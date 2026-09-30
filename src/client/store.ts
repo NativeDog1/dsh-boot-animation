@@ -277,6 +277,35 @@ export class ClientStore {
   }
 
   /**
+   * Resolve one mode without starting playback.
+   *
+   * Pinning uses this only when there is no explicit selectedClipId to snapshot.
+   * Keeping resolution in the store preserves the same host boundary as playMode:
+   * the UI never grows its own fetch/priority logic.
+   */
+  async resolveClipId(mode: 'active' | 'random' | 'selected' = 'active'): Promise<string | null> {
+    try {
+      const response = await fetch(`${RESOLVE_URL}?mode=${mode}`, { cache: 'no-store' })
+      if (response.ok) {
+        const data = (await response.json()) as { clipId?: string | null }
+        if (typeof data.clipId === 'string' && data.clipId !== '') return data.clipId
+        if (data.clipId === null) return null
+      }
+      notify('resolve id fell back to the catalog', { mode })
+    } catch (error) {
+      notify('resolve id failed', String(error))
+    }
+
+    const settings = this.#snapshot.settings
+    if (mode === 'selected') return settings.selectedClipId
+    if (mode === 'random' || settings.randomPlayback) {
+      const pool = this.#snapshot.catalog?.clips ?? []
+      return pool.length > 0 ? pool[0].id : null
+    }
+    return settings.selectedClipId
+  }
+
+  /**
    * Ask the host which clip should play in a given mode, then play it.
    *
    * The client never decides this itself: `selected`, `active` (which honours

@@ -53,7 +53,7 @@
     "build": "node scripts/build.mjs",
     "build:client": "node scripts/check-css-template.mjs && tsdown",
     "embed-clips": "node scripts/embed-clips.mjs",
-      "check": "npm run verify:build && npm run verify:routes && npm run verify:selection && npm run verify:cache && npm run verify:blank && npm run verify:boot && npm run verify:preview && npm run verify:playback && npm run verify:random && npm run verify:fallback && npm run verify:install && npm run verify:teardown && npm run verify:version-refresh && npm run verify:session-id",
+      "check": "npm run verify:build && npm run verify:routes && npm run verify:selection && npm run verify:cache && npm run verify:blank && npm run verify:boot && npm run verify:preview && npm run verify:playback && npm run verify:random && npm run verify:fallback && npm run verify:install && npm run verify:teardown && npm run verify:version-refresh && npm run verify:session-id && npm run verify:session-clips",
       "verify:build": "node scripts/check-css-template.mjs && node scripts/verify-build.mjs",
     "verify:routes": "node scripts/verify-routes.mjs",
     "verify:selection": "node scripts/verify-selection.mjs",
@@ -68,7 +68,8 @@
     "verify:letterbox": "node scripts/verify-letterbox.mjs",
     "verify:teardown": "node scripts/verify-teardown.mjs",
     "verify:version-refresh": "node scripts/verify-version-refresh.mjs",
-    "verify:session-id": "node scripts/verify-session-id.mjs"
+    "verify:session-id": "node scripts/verify-session-id.mjs",
+    "verify:session-clips": "node scripts/verify-session-clips.mjs"
   },
   "exports": {
     ".": {

@@ -30,9 +30,10 @@ import { log, notify } from './diagnostics.js'
 import {
   hasPlayed,
   markPlayed,
-  readPinned,
+  readPinnedSession,
   useCurrentSession,
   writePinned,
+  writePinnedClip,
   type CurrentStore,
 } from './session.js'
 import { ensureStyle } from './styles.js'
@@ -441,21 +442,49 @@ export function PinAction({
   onOpen: () => void
 }): ReactElement {
   ensureStyle()
+  const snapshot = useClientStore(store)
   const { sessionId } = useCurrentSession(sessionStore)
-  const [pinned, setPinned] = useState<string | null>(() => readPinned())
-  const isPinned = sessionId !== null && pinned === sessionId
+  const [, refreshPin] = useState(0)
+  const pin = sessionId === null ? null : readPinnedSession(sessionId)
+  const isPinned = pin !== null
 
-  const toggle = (): void => {
-    const next = isPinned ? null : sessionId
-    writePinned(next)
-    setPinned(next)
-    log('pin toggled', { from: pinned, to: next })
-    if (next !== null) store.setStatus('已把这个会话设为片头会话', 'dba-ok')
+  const toggle = async (): Promise<void> => {
+    if (sessionId === null) return
+
+    if (pin !== null) {
+      writePinnedClip(sessionId, null)
+      // A legacy bare-string pin has no entry in the new map. Clearing it is the
+      // only write we make to the old key, and only because the user explicitly
+      // asked to unpin that exact session.
+      if (pin.source === 'legacy') writePinned(null)
+      refreshPin((n) => n + 1)
+      log('pin toggled off', { sessionId, source: pin.source })
+      store.setStatus('已取消这个会话的片头固定', 'dba-ok')
+      return
+    }
+
+    // Snapshot the explicit choice when there is one. A fresh install can have
+    // no selectedClipId yet; ask the existing resolver for the clip that is
+    // active right now rather than inventing a second priority chain in the UI.
+    let clipId = snapshot.settings.selectedClipId
+    if (clipId === null || store.clip(clipId) === null) clipId = await store.resolveClipId('active')
+    if (clipId === null) {
+      store.setStatus('暂时无法确定这个会话要固定哪一段片头', 'dba-err')
+      return
+    }
+
+    writePinnedClip(sessionId, clipId)
+    refreshPin((n) => n + 1)
+    log('pin toggled on', { sessionId, clipId })
+    store.setStatus(`已把这个会话固定为：${store.clip(clipId)?.name ?? clipId}`, 'dba-ok')
   }
 
+  const pinnedName = pin?.clipId === null || pin === null ? null : (store.clip(pin.clipId)?.name ?? pin.clipId)
   const title = isPinned
-    ? '这个会话已设为片头会话：每次打开都会播放片头动画（点击取消）'
-    : '把这个会话设为片头会话：以后每次打开它都会播放片头动画'
+    ? pinnedName === null
+      ? '这个会话已设为片头会话：每次打开都会按当前设置播放（点击取消）'
+      : `这个会话已设为片头会话：每次打开固定播放「${pinnedName}」（点击取消）`
+    : '把这个会话设为片头会话：记住当前片头，以后每次打开它都播放这一段'
 
   return h(
     'span',
@@ -468,7 +497,9 @@ export function PinAction({
         title,
         'aria-label': title,
         disabled: sessionId === null,
-        onClick: toggle,
+        onClick: () => {
+          void toggle()
+        },
       },
       isPinned ? '🎬' : '🎞',
     ),
@@ -490,8 +521,9 @@ export function PinAction({
  * The overlay's host component: the only place the "when to play" rules live.
  *
  * A new conversation plays once (recorded per session); a pinned conversation
- * replays on every entry. Both go through `playMode`, so a random-playback
- * setting is honoured identically for both — there is no second playback path.
+ * replays on every entry. A session-scoped pin carries an explicit ClipId and
+ * therefore goes straight to `playClip`; legacy <=0.3.0 pins still follow
+ * `playMode('active')`. Both paths converge on the same playback controller.
  */
 export function AppRoot({ store, sessionStore }: { store: ClientStore; sessionStore: CurrentStore | null }): ReactElement {
   const snapshot = useClientStore(store)
@@ -519,11 +551,25 @@ export function AppRoot({ store, sessionStore }: { store: ClientStore; sessionSt
     const entered = lastSessionRef.current !== sessionId
     lastSessionRef.current = sessionId
 
-    const pinned = readPinned()
-    if (pinned !== null && pinned === sessionId) {
+    const pin = readPinnedSession(sessionId)
+    // playClip needs the catalog to translate a ClipId into its versioned media
+    // URL. Do not consume the "entered" edge until that one prerequisite exists.
+    if (pin?.clipId !== null && pin !== null && snapshot.catalog === null) return
+
+    if (pin !== null) {
       if (!entered) return
-      log('pinned session opened', sessionId)
-      void store.playMode('active', 'pinned')
+      if (pin.clipId === null) {
+        log('legacy pinned session opened', sessionId)
+        void store.playMode('active', 'pinned')
+      } else {
+        log('session-scoped pinned clip opened', { sessionId, clipId: pin.clipId })
+        if (!store.playClip(pin.clipId, 'pinned')) {
+          // A user file may have moved since it was pinned. Preserve the plugin's
+          // graceful-fallback rule rather than turning one stale mapping into a
+          // broken overlay.
+          void store.playMode('active', 'pinned')
+        }
+      }
       return
     }
     if (isNewConversation && !hasPlayed(sessionId)) {
@@ -531,7 +577,7 @@ export function AppRoot({ store, sessionStore }: { store: ClientStore; sessionSt
       log('new conversation', sessionId)
       void store.playMode('active', 'new-conversation')
     }
-  }, [sessionId, isNewConversation, store])
+  }, [sessionId, isNewConversation, snapshot.catalog, store])
 
   // A Fragment, not a wrapper element: the overlay is `position:fixed`, and an
   // extra box in the tree is exactly the kind of change that once took this

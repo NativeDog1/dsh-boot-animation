@@ -12,9 +12,11 @@
  *    face is SUBSCRIBED to rather than sampled once, because the flag arrives on
  *    a nested snapshot that can settle after the binding changes.
  *
- * 2. Both the pin and the "already played" record are per session, keyed by
- *    session id, and both live in localStorage. They are client concerns: the
- *    host never learns a session id from this plugin.
+ * 2. The "already played" record and session-scoped clip pins are client
+ *    concerns, keyed by session id and kept in localStorage. The <=0.3.0
+ *    single-pin key stays a bare-string compatibility fallback; new per-session
+ *    clip bindings use a separate map, so an older client never sees a new
+ *    storage shape under a key it already owns.
  */
 import { useCallback, useSyncExternalStore } from 'react'
 import { log } from './diagnostics.js'
@@ -134,6 +136,7 @@ export function useCurrentSession(store: CurrentStore | null): {
 
 const SEEN_KEY = 'dsh-boot-animation:played'
 const PIN_KEY = 'dsh-boot-animation:pinned'
+const SESSION_CLIPS_KEY = 'dsh-boot-animation:session-clips'
 const MAX_SEEN = 80
 
 function readSeen(): string[] {
@@ -160,6 +163,7 @@ export function markPlayed(sessionId: string): void {
   }
 }
 
+/** The <=0.3.0 single-pin value. Keep its bare-string shape for compatibility. */
 export function readPinned(): string | null {
   try {
     const value = window.localStorage.getItem(PIN_KEY)
@@ -169,6 +173,7 @@ export function readPinned(): string | null {
   }
 }
 
+/** Only used to clear or preserve a legacy single pin; new pins use SESSION_CLIPS_KEY. */
 export function writePinned(sessionId: string | null): void {
   try {
     if (sessionId === null) window.localStorage.removeItem(PIN_KEY)
@@ -176,5 +181,60 @@ export function writePinned(sessionId: string | null): void {
   } catch {
     /* private mode: the pin simply does not persist */
   }
-  log('pin written', { sessionId })
+  log('legacy pin written', { sessionId })
+}
+
+type SessionClipMap = Record<string, string>
+
+function readSessionClips(): SessionClipMap {
+  const clean = Object.create(null) as SessionClipMap
+  try {
+    const raw = window.localStorage.getItem(SESSION_CLIPS_KEY)
+    if (raw === null || raw === '') return clean
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return clean
+    for (const [sessionId, clipId] of Object.entries(parsed as Record<string, unknown>)) {
+      if (sessionId !== '' && typeof clipId === 'string' && clipId !== '') clean[sessionId] = clipId
+    }
+  } catch {
+    /* damaged/localStorage-disabled state degrades to no session-scoped pins */
+  }
+  return clean
+}
+
+/** The clip remembered for one session by the new multi-pin storage. */
+export function readPinnedClip(sessionId: string): string | null {
+  if (sessionId === '') return null
+  const pins = readSessionClips()
+  return Object.prototype.hasOwnProperty.call(pins, sessionId) ? pins[sessionId] : null
+}
+
+/** Add, replace or remove one session -> clip binding without touching PIN_KEY. */
+export function writePinnedClip(sessionId: string, clipId: string | null): void {
+  if (sessionId === '') return
+  try {
+    const pins = readSessionClips()
+    if (clipId === null || clipId === '') delete pins[sessionId]
+    else pins[sessionId] = clipId
+    if (Object.keys(pins).length === 0) window.localStorage.removeItem(SESSION_CLIPS_KEY)
+    else window.localStorage.setItem(SESSION_CLIPS_KEY, JSON.stringify(pins))
+  } catch {
+    /* private mode: the pin simply does not persist */
+  }
+  log('session clip pin written', { sessionId, clipId })
+}
+
+/**
+ * Resolve whether one session is pinned.
+ *
+ * Session-scoped bindings win. A legacy <=0.3.0 bare-string pin remains readable
+ * and keeps the old "follow active" behaviour until the user explicitly unpins
+ * it. That lets an upgraded client add new pins without rewriting old state.
+ */
+export function readPinnedSession(
+  sessionId: string,
+): { clipId: string | null; source: 'session-map' | 'legacy' } | null {
+  const clipId = readPinnedClip(sessionId)
+  if (clipId !== null) return { clipId, source: 'session-map' }
+  return readPinned() === sessionId ? { clipId: null, source: 'legacy' } : null
 }

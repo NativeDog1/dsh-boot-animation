@@ -5,6 +5,17 @@
 > Changes that a user can see, one section per release. English one-liners are
 > included so an English reader can scan the list.
 
+## Unreleased
+
+- **Pinned conversations can remember their own clip.** New pins store a separate
+  `sessionId -> ClipId` map in client localStorage, so multiple conversations can
+  each replay the clip that was active when they were pinned.
+- The <=0.3.0 `dsh-boot-animation:pinned` bare-string key remains a compatibility
+  fallback and is never given the new map shape. If a remembered user clip moves,
+  playback falls back to the ordinary active resolver instead of failing.
+- Added a shipped-bundle regression check for independent session mappings,
+  legacy-key compatibility, damaged storage, and resolver fallback.
+
 ## 0.3.0 — 2026-09-29
 
 **架构级重构：一个片段一个 ClipId、一条播放路径、一个数据源**
