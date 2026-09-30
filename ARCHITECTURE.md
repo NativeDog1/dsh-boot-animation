@@ -21,7 +21,7 @@ src/
   client/                   浏览器半边：TS，tsdown 打成 lib/client.js
     index.ts                接线：dynamic inject + 挂载两个 slot
     store.ts                ClientStore：客户端唯一数据源
-    session.ts              uiSession 绑定（blank 双形状）+ pin/已播记录
+    session.ts              uiSession 绑定（blank 双形状）+ session→clip pin/已播记录
     ui.ts                   三个界面：BootOverlay / VideoLibrary / PinAction
     styles.ts               样式表（模板字符串，有 check-css-template 防呆）
     diagnostics.ts          客户端诊断
@@ -125,7 +125,7 @@ playback.clipId            播放器此刻指向的片段
 trigger
   → 需要"现在该播谁"时问主机 GET /resolve.json?mode=active|random|selected
         （主机 ClipResolver 回答；随机也在主机决策，见 §8）
-  → 已知 clipId（如预览）则直接用
+  → 已知 clipId（如预览、session-scoped pin）则直接用
   → ClientStore.playClip(clipId, reason)
         url = /dsh-boot-animation/media/<ClipId>?v=<该片段自己的 version>
         nonce += 1
@@ -208,6 +208,12 @@ Range：`206` + `content-range` + `accept-ranges`；后缀式、开区间、不�
 `env-clip-error`。
 
 ## 10. Backward compatibility
+
+客户端 pin 从 0.3.0 的单个裸字符串扩展时使用了**新 key**：
+`dsh-boot-animation:session-clips` 保存 `sessionId -> ClipId`。旧的
+`dsh-boot-animation:pinned` 仍只按裸字符串读取；新映射不会写进旧 key。
+因此旧 pin 继续按 active 模式工作，而新 pin 可以逐会话固定片段；降级到旧客户端时
+新 key 会被忽略，不会把旧客户端喂进不认识的 JSON 形状。
 
 | 旧行为 | 现在 |
 |---|---|

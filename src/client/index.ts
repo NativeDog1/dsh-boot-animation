@@ -31,7 +31,7 @@ import type { CurrentStore } from './session.js'
 import { AppRoot, PinAction, openLibrary } from './ui.js'
 
 /** Re-exported so the shipped bundle can be tested directly, not a copy. */
-export { isBlankSession, resolveSessionId } from './session.js'
+export { isBlankSession, readPinnedClip, readPinnedSession, resolveSessionId, writePinnedClip } from './session.js'
 export { ClientStore, mediaUrlFor } from './store.js'
 export { releaseVideo } from './ui.js'
 
