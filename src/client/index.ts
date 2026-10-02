@@ -32,6 +32,24 @@ import { AppRoot, PinAction, openLibrary } from './ui.js'
 
 /** Re-exported so the shipped bundle can be tested directly, not a copy. */
 export { isBlankSession, resolveSessionId } from './session.js'
+/**
+ * The boot-scope record and the when-to-play rule, re-exported for
+ * `scripts/verify-boot-scope.mjs`: `decidePlay` is the 0.4.2 fix expressed as a
+ * pure function, and a test that could not reach it would only be able to assert
+ * that the bundle built.
+ */
+export {
+  clearBootPlayed,
+  decidePlay,
+  hasBootPlayed,
+  hasPlayed,
+  markBootPlayed,
+  markPlayed,
+  readPinned,
+  recordDecision,
+  writePinned,
+} from './session.js'
+export { DEFAULT_PLAY_ON_APP_START } from './store.js'
 export { ClientStore, mediaUrlFor } from './store.js'
 export { releaseVideo } from './ui.js'
 

@@ -65,7 +65,21 @@ export type Settings = {
   selectedClipId: string | null
   randomPlayback: boolean
   fitMode: FitMode
+  /**
+   * Which auto-play rule the client obeys (0.4.2).
+   *
+   *   true   the intro plays once per DSH launch, in whatever conversation the
+   *          app opens first (the "boot animation" reading)
+   *   false  the original rule: once per NEW conversation, recorded per session
+   *
+   * Host-owned, not localStorage: a DSH port change would otherwise drop it.
+   * A pinned conversation replays on every entry regardless of this setting.
+   */
+  playOnAppStart: boolean
 }
+
+/** The host's default, mirrored so the pre-payload state equals "not loaded yet". */
+export const DEFAULT_PLAY_ON_APP_START = true
 
 export type Playback = {
   clipId: string | null
@@ -80,6 +94,16 @@ export type Playback = {
 export type Snapshot = {
   catalog: Catalog | null
   settings: Settings
+  /**
+   * Has a host payload actually answered with settings?
+   *
+   * The when-to-play decision waits for this instead of assuming a default. The
+   * setting is the HOST's; a client that guessed "not loaded, so play" would play
+   * against a user who turned the toggle off, and one that guessed "play once per
+   * launch" would do the same. Until the answer arrives there is no decision to
+   * make.
+   */
+  settingsLoaded: boolean
   playback: Playback
   /** Which conversation the client is in, as far as the host told us. */
   sessionId: string | null
@@ -101,7 +125,12 @@ const LIST_URL = `${BASE}/videos.json`
 const SELECT_URL = `${BASE}/select`
 const RESOLVE_URL = `${BASE}/resolve.json`
 
-const EMPTY_SETTINGS: Settings = { selectedClipId: null, randomPlayback: false, fitMode: 'cover' }
+const EMPTY_SETTINGS: Settings = {
+  selectedClipId: null,
+  randomPlayback: false,
+  fitMode: 'cover',
+  playOnAppStart: DEFAULT_PLAY_ON_APP_START,
+}
 
 const IDLE_PLAYBACK: Playback = {
   clipId: null,
@@ -131,6 +160,7 @@ export class ClientStore {
   #snapshot: Snapshot = {
     catalog: null,
     settings: EMPTY_SETTINGS,
+    settingsLoaded: false,
     playback: IDLE_PLAYBACK,
     sessionId: null,
     conversationClipId: null,
@@ -201,6 +231,7 @@ export class ClientStore {
         selectedClipId?: string | null
         randomPlayback?: boolean
         fitMode?: FitMode
+        playOnAppStart?: boolean
         conversationClipId?: string | null
       }
       this.#set({
@@ -213,7 +244,16 @@ export class ClientStore {
           selectedClipId: typeof data.selectedClipId === 'string' ? data.selectedClipId : null,
           randomPlayback: data.randomPlayback === true,
           fitMode: data.fitMode === 'contain' ? 'contain' : 'cover',
+          /**
+           * A host that predates 0.4.2 does not send this field. Its behaviour
+           * WAS "play once per new conversation", so an old host reads as `false`
+           * — the older rule — rather than being handed the new one it does not
+           * know about. A 0.4.2+ host always sends an explicit boolean.
+           */
+          playOnAppStart:
+            data.playOnAppStart === undefined ? false : data.playOnAppStart === true,
         },
+        settingsLoaded: true,
         conversationClipId: typeof data.conversationClipId === 'string' ? data.conversationClipId : null,
         loading: false,
         status: { text: '', kind: '' },
@@ -221,6 +261,8 @@ export class ClientStore {
       log('catalog loaded', { clips: data.videos?.length ?? 0, conversationClipId: data.conversationClipId ?? null })
     } catch (error) {
       notify('catalog load failed', String(error))
+      // `settingsLoaded` stays false: the host never answered, so the decision
+      // effect keeps waiting rather than guessing at a rule the user chose.
       this.#set({ loading: false, status: { text: '读取片库失败：' + String(error), kind: 'dba-err' } })
     }
   }
@@ -240,6 +282,7 @@ export class ClientStore {
         selectedClipId?: string | null
         randomPlayback?: boolean
         fitMode?: FitMode
+        playOnAppStart?: boolean
         conversationClipId?: string | null
       }
       if (data.ok !== true) {
@@ -272,6 +315,10 @@ export class ClientStore {
               : data.fitMode === 'contain'
                 ? 'contain'
                 : 'cover',
+          playOnAppStart:
+            data.playOnAppStart === undefined
+              ? previous.settings.playOnAppStart
+              : data.playOnAppStart === true,
         },
         conversationClipId:
           data.conversationClipId === undefined
@@ -303,6 +350,21 @@ export class ClientStore {
 
   async setRandomPlayback(on: boolean): Promise<boolean> {
     return this.#writeSettings({ randomPlayback: on }, on ? '已开启随机播放' : '已关闭随机播放')
+  }
+
+  /**
+   * Switch the auto-play rule: once per DSH launch, or once per new conversation.
+   *
+   * Written to the HOST (`playOnAppStart` in selection.json), not localStorage,
+   * so the choice survives a port change and is the same one the decision effect
+   * reads back. The host answers with the stored value, which is what the UI
+   * shows — the client never keeps its own idea of this setting.
+   */
+  async setPlayOnAppStart(on: boolean): Promise<boolean> {
+    return this.#writeSettings(
+      { playOnAppStart: on },
+      on ? '已开启：每次启动 DSH 播一次' : '已关闭：只在新建会话时播一次',
+    )
   }
 
   /**

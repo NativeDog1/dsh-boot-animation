@@ -29,9 +29,11 @@ import type { ReactElement } from 'react'
 import { Fragment, createElement as h, useCallback, useEffect, useRef, useState } from 'react'
 import { log, notify } from './diagnostics.js'
 import {
+  decidePlay,
+  hasBootPlayed,
   hasPlayed,
-  markPlayed,
   readPinned,
+  recordDecision,
   useCurrentSession,
   writePinned,
   type CurrentStore,
@@ -461,6 +463,37 @@ export function VideoLibrary({ store, onClose }: { store: ClientStore; onClose: 
           snapshot.settings.randomPlayback ? '🎲 随机播放：开' : '🎲 随机播放：关',
         ),
       ),
+      /**
+       * The when-to-play switch (0.4.2). Its state is the HOST's
+       * `playOnAppStart`, read back from `/videos.json` — never a client-side
+       * guess — and the label spells out both rules so it cannot mislead.
+       */
+      h(
+        'div',
+        { className: 'dba-fit' },
+        h('span', null, '什么时候播：'),
+        h(
+          'button',
+          {
+            type: 'button',
+            className: 'dba-btn' + (snapshot.settings.playOnAppStart ? ' dba-btn-on' : ''),
+            title:
+              '每次启动 DSH 应用时播放一次片头；同一轮使用中不重复，下次打开 DSH 再播一次。' +
+              '关掉后只在你新建会话时播一次。被钉住的会话不受这个开关影响，仍然每次进入都重播。',
+            onClick: () => void store.setPlayOnAppStart(!snapshot.settings.playOnAppStart),
+          },
+          snapshot.settings.playOnAppStart
+            ? '🚀 每次启动 DSH 时播放一次：开'
+            : '🚀 每次启动 DSH 时播放一次：关（只在新建会话时播）',
+        ),
+        h(
+          'span',
+          { className: 'dba-note' },
+          snapshot.settings.playOnAppStart
+            ? '同一轮使用中不重复；下次打开 DSH 再播'
+            : '只在新建会话时播一次',
+        ),
+      ),
       h(
         'div',
         { className: 'dba-bar' },
@@ -541,10 +574,19 @@ export function PinAction({
 /**
  * The overlay's host component: the only place the "when to play" rules live.
  *
- * A new conversation plays once (recorded per session); a pinned conversation
- * replays on every entry. Both go through `playMode`, so a per-conversation pin
- * AND a random-playback setting are honoured identically for both — there is no
- * second playback path.
+ * Two rules, and the user picks which one by toggling `playOnAppStart` in the
+ * library panel (the value lives on the HOST, in selection.json):
+ *
+ *   on  (default)  play once per DSH launch, in whatever conversation the app
+ *                  opens first — the "boot animation" reading, and the fix for
+ *                  the field report 「一次性的」
+ *   off            the original rule: once per new conversation, per session
+ *
+ * A pinned conversation replays on every entry under BOTH rules, and neither
+ * rule nor the toggle touches it. The decision itself is `decidePlay` in
+ * session.ts — pure, so it can be tested exhaustively; this component only
+ * gathers its inputs and calls `playMode`, so there is still exactly one
+ * playback path for a pin, a random setting and an auto-play alike.
  */
 export function AppRoot({ store, sessionStore }: { store: ClientStore; sessionStore: CurrentStore | null }): ReactElement {
   const snapshot = useClientStore(store)
@@ -581,19 +623,24 @@ export function AppRoot({ store, sessionStore }: { store: ClientStore; sessionSt
     const entered = lastSessionRef.current !== sessionId
     lastSessionRef.current = sessionId
 
-    const pinned = readPinned()
-    if (pinned !== null && pinned === sessionId) {
-      if (!entered) return
-      log('pinned session opened', sessionId)
-      void store.playMode('active', 'pinned')
-      return
-    }
-    if (isNewConversation && !hasPlayed(sessionId)) {
-      markPlayed(sessionId)
-      log('new conversation', sessionId)
-      void store.playMode('active', 'new-conversation')
-    }
-  }, [sessionId, isNewConversation, store])
+    const decision = decidePlay({
+      sessionId,
+      entered,
+      settingsLoaded: snapshot.settingsLoaded,
+      settings: snapshot.settings,
+      pinned: readPinned(),
+      isNewConversation,
+      bootPlayed: hasBootPlayed(),
+      sessionPlayed: hasPlayed(sessionId),
+    })
+    if (decision.action !== 'play') return
+    // Record BEFORE asking to play, so a second pass (the session binding
+    // settling, or the host's settings payload arriving) cannot queue a second
+    // play of the same launch.
+    recordDecision(decision, sessionId)
+    log('playing the intro', { reason: decision.reason, sessionId })
+    void store.playMode('active', decision.reason)
+  }, [sessionId, isNewConversation, snapshot.settingsLoaded, snapshot.settings, store])
 
   // A Fragment, not a wrapper element: the overlay is `position:fixed`, and an
   // extra box in the tree is exactly the kind of change that once took this

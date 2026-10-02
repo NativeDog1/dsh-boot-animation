@@ -110,7 +110,11 @@ console.log('\nthe global choice is never rewritten:')
       'and records the pin in its own layer',
     )
     report.check(
-      Object.keys(onDisk).sort().join(',') === 'conversationOverrides,fitMode,randomPlayback,selectedClipId,version',
+      // `playOnAppStart` joined the set in 0.4.2; the point of the assertion is
+      // that a session id never becomes a top-level field, so the expected set is
+      // spelled out rather than counted.
+      Object.keys(onDisk).sort().join(',') ===
+        'conversationOverrides,fitMode,playOnAppStart,randomPlayback,selectedClipId,version',
       'the settings file keeps its exact key set — no session id becomes a top-level field',
       Object.keys(onDisk).join(', '),
     )

@@ -60,10 +60,47 @@ console.log('migrate() — pure, no I/O:')
     fitMode: 'cover',
     conversationOverrides: { 'session-1': 'builtin:cyberpunk' },
   })
-  report.check(v3.migrated === false, 'a file of the current version is not reported as migrated')
+  report.check(v3.migrated === true, 'a v3 file (pre-`playOnAppStart`) reports as migrated')
+  report.check(v3.selection.conversationOverrides['session-1'] === 'builtin:cyberpunk', 'a v3 file keeps its per-conversation pins')
   report.check(
-    v3.selection.conversationOverrides['session-1'] === 'builtin:cyberpunk',
+    v3.selection.playOnAppStart === true,
+    'a v3 file gains playOnAppStart: true — the rule v3 already implemented',
+  )
+}
+{
+  // The CURRENT version must not be reported as migrated, whatever it is. Written
+  // against SELECTION_VERSION rather than a literal so bumping the schema cannot
+  // silently turn this into "the newest file is always migrated".
+  const current = migrate({
+    version: SELECTION_VERSION,
+    selectedClipId: 'builtin:brand',
+    randomPlayback: false,
+    fitMode: 'cover',
+    playOnAppStart: false,
+    conversationOverrides: { 'session-1': 'builtin:cyberpunk' },
+  })
+  report.check(current.migrated === false, `a v${String(SELECTION_VERSION)} file is not reported as migrated`)
+  report.check(
+    current.selection.conversationOverrides['session-1'] === 'builtin:cyberpunk',
     'a current file keeps its per-conversation pins',
+  )
+  report.check(current.selection.playOnAppStart === false, 'a current file keeps an explicit playOnAppStart: false')
+}
+{
+  // The default only fills a MISSING field. Collapsing a stored `false` into the
+  // default is the bug that would make an off toggle spring back on.
+  report.check(migrate({ version: 3 }).selection.playOnAppStart === true, 'an absent playOnAppStart defaults to true')
+  report.check(
+    migrate({ version: 3, playOnAppStart: false }).selection.playOnAppStart === false,
+    'a stored playOnAppStart: false survives the migration',
+  )
+  report.check(
+    migrate({ version: 3, playOnAppStart: 'true' }).selection.playOnAppStart === true,
+    'a non-boolean playOnAppStart falls back to the default rather than being trusted',
+  )
+  report.check(
+    migrate({ version: 3, playOnAppStart: 'no' }).selection.playOnAppStart === true,
+    'the default is true, not false, so a typo cannot turn the feature off',
   )
 }
 {
@@ -125,6 +162,10 @@ console.log('\nover the real routes:')
     const list = (await h.request('GET', '/dsh-boot-animation/videos.json')).json()
     report.check(list.selectionVersion === SELECTION_VERSION, 'the library reports the schema version')
     report.check(list.randomPlayback === false && list.fitMode === 'cover', 'a fresh install reads defaults')
+    report.check(
+      list.playOnAppStart === true,
+      'a fresh install reads playOnAppStart: true (the once-per-DSH-launch rule is the default)',
+    )
 
     const first = h.request('POST', '/dsh-boot-animation/select', { body: { selectedClipId: 'builtin:cyberpunk' } })
     const written = (await first).json()
@@ -134,7 +175,8 @@ console.log('\nover the real routes:')
     report.check(onDisk.version === SELECTION_VERSION, `the file on disk is version ${String(SELECTION_VERSION)}`)
     report.check(onDisk.selectedClipId === 'builtin:cyberpunk', 'the file records the chosen ClipId')
     report.check(
-      Object.keys(onDisk).sort().join(',') === 'conversationOverrides,fitMode,randomPlayback,selectedClipId,version',
+      Object.keys(onDisk).sort().join(',') ===
+        'conversationOverrides,fitMode,playOnAppStart,randomPlayback,selectedClipId,version',
       'the file contains settings ONLY (no paths, no timestamps)',
       Object.keys(onDisk).join(', '),
     )

@@ -3,8 +3,8 @@
  *
  * `$DSH_HOME/boot-animation/selection.json` holds settings and nothing else:
  *
- *   { "version": 3, "selectedClipId": "builtin:brand",
- *     "randomPlayback": false, "fitMode": "cover",
+ *   { "version": 4, "selectedClipId": "builtin:brand",
+ *     "randomPlayback": false, "fitMode": "cover", "playOnAppStart": true,
  *     "conversationOverrides": { "session-abc": "builtin:cyberpunk" } }
  *
  * `conversationOverrides` is the per-conversation layer: one session pinned to
@@ -13,6 +13,11 @@
  * choice — and this store is the only thing in the plugin that knows how to
  * write a settings file atomically and heal a corrupt one. A second settings
  * file would need a second copy of both.
+ *
+ * `playOnAppStart` (added in 0.4.2) is which of the two auto-play rules the
+ * client obeys. It lives HERE, not in localStorage, on purpose: localStorage is
+ * partitioned per origin, so a DSH port change would silently drop the user's
+ * choice — one of the field reports behind "设置没了". Defaults to true.
  *
  * Three rules, each of which is a bug this file exists to prevent:
  *
@@ -36,11 +41,21 @@ import { ACTIVE_ALIAS, normalizeClipId } from './clip-id.js'
 import { ClipError } from './errors.js'
 
 /** Current on-disk schema. Bump and extend `migrate` together. */
-export const SELECTION_VERSION = 3
+export const SELECTION_VERSION = 4
 
 /** Fit modes the client understands; anything else falls back to the default. */
 export const FIT_MODES = ['cover', 'contain']
 export const DEFAULT_FIT = 'cover'
+
+/**
+ * The default for `playOnAppStart`.
+ *
+ * TRUE. A boot animation that only ever plays in a conversation it has not seen
+ * before reads as "一次性的" — that is the field report 0.4.2 exists to fix — so
+ * the default is the once-per-DSH-launch rule, and turning the toggle off is
+ * what restores the old per-new-conversation behaviour.
+ */
+export const DEFAULT_PLAY_ON_APP_START = true
 
 /**
  * How many per-conversation pins are kept.
@@ -81,6 +96,7 @@ export function defaultSelection() {
     selectedClipId: null,
     randomPlayback: false,
     fitMode: DEFAULT_FIT,
+    playOnAppStart: DEFAULT_PLAY_ON_APP_START,
     conversationOverrides: {},
   }
 }
@@ -114,19 +130,41 @@ function coerceFit(value) {
   return typeof value === 'string' && FIT_MODES.includes(value) ? value : DEFAULT_FIT
 }
 
+/** Strict: only a real boolean counts, and `false` is a real boolean. */
 function coerceBoolean(value) {
   return value === true
+}
+
+/**
+ * A tri-state on-disk boolean: `true` / `false` written by a user, or "absent".
+ *
+ * The default ONLY applies when the field is genuinely missing (an older file, a
+ * file with a typo'd key). A stored `false` must survive as `false` — collapsing
+ * it into the default is precisely the bug that would make an off toggle spring
+ * back on.
+ *
+ * @param {unknown} value
+ * @param {boolean} fallback
+ */
+function coerceBooleanDefault(value, fallback) {
+  if (typeof value === 'boolean') return value
+  return fallback
 }
 
 /**
  * Any historical or damaged shape to a valid current selection.
  *
  * Pure. Accepts:
- *   - `{ version: 3, ... }`            current
+ *   - `{ version: 4, ... }`            current (adds `playOnAppStart`)
+ *   - `{ version: 3, ... }`            0.4.x: conversation layer, no app-start toggle
  *   - `{ version: 2, ... }`            0.3.x: no conversation layer yet
  *   - `{ id: "builtin:brand" }`        v1 (0.1.x - 0.2.x): the id field was bare
  *   - `{ selectedClipId: "..." }`      v2 without a version stamp
  *   - `null`, `undefined`, garbage     defaults
+ *
+ * Every version below 4 migrates to `playOnAppStart: true`, which is the rule
+ * those versions already implemented — the field's addition is not a behaviour
+ * change until the user turns it off.
  *
  * @param {unknown} raw
  * @returns {{ selection: ReturnType<typeof defaultSelection>, migrated: boolean, reason: string }}
@@ -150,6 +188,8 @@ export function migrate(raw) {
     selectedClipId,
     randomPlayback: coerceBoolean(source.randomPlayback),
     fitMode: coerceFit(source.fitMode ?? source.fit),
+    // Absent (any pre-0.4.2 file) -> true. A stored false stays false.
+    playOnAppStart: coerceBooleanDefault(source.playOnAppStart, DEFAULT_PLAY_ON_APP_START),
     // A v2 file has no conversation layer, and "no layer" and "an empty layer"
     // mean the same thing here, so this migrates without a special case.
     conversationOverrides: coerceOverrides(source.conversationOverrides),
@@ -247,7 +287,7 @@ export class SelectionStore {
    * Only known fields are accepted; an unknown key is a programming error and
    * throws a ClipError rather than silently writing junk into the file.
    *
-   * @param {{ selectedClipId?: string | null, randomPlayback?: boolean, fitMode?: string }} patch
+   * @param {{ selectedClipId?: string | null, randomPlayback?: boolean, fitMode?: string, playOnAppStart?: boolean }} patch
    * @returns {ReturnType<typeof defaultSelection>}
    */
   write(patch) {
@@ -271,8 +311,17 @@ export class SelectionStore {
     if (Object.prototype.hasOwnProperty.call(patch, 'fitMode')) {
       next.fitMode = coerceFit(patch.fitMode)
     }
+    if (Object.prototype.hasOwnProperty.call(patch, 'playOnAppStart')) {
+      // A non-boolean must not silently become `true` (which would make an
+      // attempted "off" look like it worked) nor `false` (which would flip the
+      // default for a typo). It is a programming error, like the unknown key.
+      if (typeof patch.playOnAppStart !== 'boolean') {
+        throw new ClipError(`playOnAppStart must be a boolean, got: ${String(patch.playOnAppStart)}`)
+      }
+      next.playOnAppStart = patch.playOnAppStart
+    }
     for (const key of Object.keys(patch)) {
-      if (!['selectedClipId', 'randomPlayback', 'fitMode'].includes(key)) {
+      if (!['selectedClipId', 'randomPlayback', 'fitMode', 'playOnAppStart'].includes(key)) {
         throw new ClipError(`selection has no field "${key}"`)
       }
     }

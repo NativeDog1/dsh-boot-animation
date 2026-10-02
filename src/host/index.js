@@ -216,6 +216,15 @@ export function apply(ctx) {
         selectedClipId: settings.selectedClipId,
         randomPlayback: settings.randomPlayback,
         fitMode: settings.fitMode,
+        /**
+         * Which auto-play rule the client obeys.
+         *
+         * Deliberately part of the SETTINGS payload and not a client default: it
+         * is the user's choice, it must survive a DSH port change (localStorage
+         * would not), and the client's decision effect waits for this payload
+         * instead of guessing.
+         */
+        playOnAppStart: settings.playOnAppStart,
         selectionVersion: settings.version,
         mediaRoute: MEDIA_ROUTE,
         /**
@@ -254,6 +263,7 @@ export function apply(ctx) {
         selectedClipId: payload.selectedClipId,
         randomPlayback: payload.randomPlayback,
         fitMode: payload.fitMode,
+        playOnAppStart: payload.playOnAppStart,
         conversationClipId: payload.conversationClipId,
         conversationOverrideCount: payload.conversationOverrideCount,
         /**
@@ -417,6 +427,9 @@ export function apply(ctx) {
       else if (Object.prototype.hasOwnProperty.call(parsed, 'id')) patch.selectedClipId = parsed.id
       if (Object.prototype.hasOwnProperty.call(parsed, 'randomPlayback')) patch.randomPlayback = parsed.randomPlayback
       if (Object.prototype.hasOwnProperty.call(parsed, 'fitMode')) patch.fitMode = parsed.fitMode
+      // The app-start toggle travels the same path as every other setting, so it
+      // is written atomically and with the same validation as the rest.
+      if (Object.prototype.hasOwnProperty.call(parsed, 'playOnAppStart')) patch.playOnAppStart = parsed.playOnAppStart
 
       if (Object.keys(patch).length === 0) {
         sendJson(res, { ok: false, error: 'nothing to change' }, 400)
@@ -445,6 +458,7 @@ export function apply(ctx) {
           selectedClipId: next.selectedClipId,
           randomPlayback: next.randomPlayback,
           fitMode: next.fitMode,
+          playOnAppStart: next.playOnAppStart,
           name: next.selectedClipId === null ? null : (registry.get(next.selectedClipId)?.name ?? null),
         })
       } catch (cause) {

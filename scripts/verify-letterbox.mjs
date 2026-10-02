@@ -13,6 +13,17 @@
  * the clip's aspect ratio, because window chrome takes height away. A 16:9 clip
  * on a 16:9 screen is still letterboxed.
  *
+ * And it measures the OVERLAY'S COVERAGE (since 0.4.2): the same page is rendered
+ * twice — once bare, once inside an ancestor with `transform: translateZ(0)`,
+ * which is the real-world way a `position:fixed` element stops covering the
+ * window and starts covering one panel instead. The bare page must COVER; the
+ * wrapped one must be DETECTED as not covering. The second half is the negative
+ * control: without it, a probe that always answers "covered" would look like a
+ * pass.
+ *
+ * Scope, stated plainly: this is the DSH client WINDOW. It does not cover the OS
+ * screen — the Windows taskbar and the desktop stay visible.
+ *
  * Usage: node scripts/verify-letterbox.mjs [--port 3080] [--width 2560] [--height 1400]
  */
 import { spawn } from 'node:child_process'
@@ -62,6 +73,32 @@ const dir = mkdtempSync(join(tmpdir(), 'dba-probe-'))
 const pagePath = join(dir, 'probe.html')
 writeFileSync(pagePath, page, 'utf8')
 const pageUrl = 'file:///' + pagePath.replace(/\\/g, '/')
+
+/**
+ * The same overlay, wrapped in an ancestor that CREATES A CONTAINING BLOCK for
+ * it. `transform: translateZ(0)` is the canonical case — a "just make it
+ * composite" one-liner that silently demotes every `position:fixed` descendant to
+ * positioning inside the wrapper. This is the negative control for the coverage
+ * probe: if the probe cannot see this one, it cannot see the real thing either.
+ */
+const wrappedPath = join(dir, 'probe-wrapped.html')
+writeFileSync(
+  wrappedPath,
+  `<!doctype html><meta charset="utf-8"><title>wrapped probe</title>
+<style>
+  html,body{margin:0;padding:0;overflow:hidden;background:#f0f}
+  /* The offender. Also given a size so the difference is visible: the overlay
+     now resolves against THIS box, not against the viewport. */
+  #wrapper{transform:translateZ(0);width:420px;height:260px;position:relative;overflow:hidden}
+  .dba-root{position:fixed;inset:0;z-index:2147483000;background:#000;
+    pointer-events:auto;cursor:pointer;overflow:hidden}
+  .dba-video{position:absolute;inset:0;width:100%;height:100%;
+    object-fit:contain;background:#000;display:block}
+</style>
+<div id="wrapper"><div class="dba-root"><video class="dba-video" muted playsinline></video></div></div>`,
+  'utf8',
+)
+const wrappedUrl = 'file:///' + wrappedPath.replace(/\\/g, '/')
 
 const child = spawn(
   browser,
@@ -175,6 +212,97 @@ const MEASURE = (mode) => `(() => {
   });
 })()`
 
+/**
+ * Overlay coverage, measured in the layout engine.
+ *
+ * `position:fixed;inset:0` only covers the viewport when no ancestor creates a
+ * containing block for it. `transform`, `filter`, `perspective`, `contain` and
+ * `will-change` all demote a fixed element to positioning inside that ancestor,
+ * and the symptom is the overlay covering one panel instead of the window — the
+ * bug the wrapper below reproduces on purpose. `elementFromPoint` at the four
+ * corners and the centre then checks that the overlay is genuinely on TOP there,
+ * not merely the right size.
+ */
+const COVERAGE = (label) => `(() => {
+  const root = document.querySelector('.dba-root');
+  if (!root) return JSON.stringify({ label: ${JSON.stringify(label)}, ok: false, reasons: ['no .dba-root in the document'], detail: {} });
+  const rect = root.getBoundingClientRect();
+  const vw = window.innerWidth, vh = window.innerHeight;
+  const style = getComputedStyle(root);
+  const reasons = [];
+  const detail = {
+    position: style.position,
+    zIndex: style.zIndex,
+    viewport: [vw, vh],
+    rect: [Math.round(rect.left), Math.round(rect.top), Math.round(rect.width), Math.round(rect.height)],
+    scroll: [window.scrollX, window.scrollY],
+  };
+  if (style.position !== 'fixed') reasons.push('position is ' + style.position + ', not fixed');
+  if (rect.width < vw - 1 || rect.height < vh - 1) {
+    reasons.push('the box ' + Math.round(rect.width) + 'x' + Math.round(rect.height) + ' does not fill the viewport ' + vw + 'x' + vh);
+  }
+  if (Math.abs(rect.left) > 1 || Math.abs(rect.top) > 1) {
+    reasons.push('the box is offset from the viewport origin by (' + Math.round(rect.left) + ',' + Math.round(rect.top) + ')');
+  }
+  // The containing-block walk: an empty list means fixed really resolves against
+  // the viewport, which is the property the whole rule rests on.
+  //
+  // Each property is compared against ITS OWN neutral value, not against the word
+  // "none". "transform-style" reports "flat" by default and "will-change" reports
+  // "auto"; treating those as offenders would flag every page ever rendered and
+  // make the probe useless. (Learned the hard way: the first version failed its
+  // own bare case because of "transform-style: flat".)
+  const NEUTRAL = {
+    transform: 'none', transformStyle: 'flat', translate: 'none', rotate: 'none', scale: 'none',
+    filter: 'none', backdropFilter: 'none', perspective: 'none',
+    contain: 'none', containerType: 'normal', willChange: 'auto',
+  };
+  const blockers = [];
+  for (let el = root.parentElement; el !== null; el = el.parentElement) {
+    const cs = getComputedStyle(el);
+    const bad = [];
+    for (const [prop, neutral] of Object.entries(NEUTRAL)) {
+      const value = cs[prop];
+      if (typeof value === 'string' && value !== '' && value !== neutral) bad.push(prop + ': ' + value);
+    }
+    if (bad.length > 0) blockers.push({ tag: el.tagName.toLowerCase(), cls: String(el.className || '').slice(0, 40), offending: bad });
+  }
+  detail.blockers = blockers;
+  if (blockers.length > 0) reasons.push('an ancestor creates a containing block: ' + JSON.stringify(blockers[0]));
+
+  const points = [[2, 2], [vw - 3, 2], [2, vh - 3], [vw - 3, vh - 3], [Math.round(vw / 2), Math.round(vh / 2)]];
+  const hits = points.map((point) => {
+    const hit = document.elementFromPoint(point[0], point[1]);
+    return {
+      at: point,
+      tag: hit ? hit.tagName.toLowerCase() : null,
+      inOverlay: hit !== null && (hit === root || root.contains(hit)),
+      outside: hit !== null && !(hit === root || root.contains(hit)) ? String(hit.className || hit.tagName).slice(0, 30) : null,
+    };
+  });
+  detail.hits = hits;
+  const missed = hits.filter((hit) => !hit.inOverlay);
+  if (missed.length > 0) reasons.push(missed.length + ' of ' + hits.length + ' sample points are not covered: ' + JSON.stringify(missed));
+
+  return JSON.stringify({ label: ${JSON.stringify(label)}, ok: reasons.length === 0, reasons, detail });
+})()`
+
+/** Print one coverage measurement in the same shape as the letterbox table. */
+function reportCoverage(raw) {
+  const probe = JSON.parse(raw)
+  const d = probe.detail ?? {}
+  console.log(
+    `  coverage[${probe.label}]`.padEnd(34) +
+      `pos=${String(d.position)} z=${String(d.zIndex)} viewport=${JSON.stringify(d.viewport)} box=${JSON.stringify(d.rect)} ` +
+      `ancestors=${d.blockers === undefined ? '?' : d.blockers.length === 0 ? 'none' : JSON.stringify(d.blockers)}`,
+  )
+  console.log(
+    `  hit[${probe.label}]`.padEnd(34) +
+      (d.hits ?? []).map((h) => `${h.at.join(',')}→${h.inOverlay ? 'overlay' : 'OUTSIDE:' + String(h.outside)}`).join('  '),
+  )
+  return probe
+}
+
 try {
   socket = await openSocket(await findTarget())
   await call('Page.enable')
@@ -197,6 +325,16 @@ try {
 
   const cover = JSON.parse(await evaluate(MEASURE('cover')))
   const contain = JSON.parse(await evaluate(MEASURE('contain')))
+  const bareCoverage = reportCoverage(await evaluate(COVERAGE('bare')))
+
+  // The negative control: the same overlay inside a transformed ancestor. The
+  // probe MUST see this one, otherwise "bare covered" proves nothing.
+  await call('Page.navigate', { url: wrappedUrl })
+  await sleep(600)
+  const wrappedCoverage = reportCoverage(await evaluate(COVERAGE('wrapped-in-transform')))
+  const wrappedBlamed = (wrappedCoverage.detail?.blockers ?? []).some((b) =>
+    (b.offending ?? []).some((offence) => String(offence).startsWith('transform')),
+  )
 
   const fmt = (m) =>
     `  ${m.mode.padEnd(8)} object-fit=${m.objectFit.padEnd(8)} viewport=${m.viewport.join('x')} ` +
@@ -220,10 +358,29 @@ try {
     failures.push('NOTE: at this viewport the two fit modes render identically — choose a size where they differ')
   }
 
+  // Coverage: the overlay must cover the client window, and the probe must be
+  // able to prove the opposite case too. Both halves are required — a probe that
+  // always says "covered" would pass the first and fail the second.
+  if (bareCoverage.ok !== true) {
+    failures.push(`the overlay does not cover the window: ${bareCoverage.reasons.join('; ')}`)
+  }
+  if (wrappedCoverage.ok !== false) {
+    failures.push(
+      'the negative control did NOT fail as it must: an ancestor with transform:translateZ(0) left the overlay ' +
+        'looking fully covering, so this probe cannot detect a containing-block ancestor at all',
+    )
+  } else if (!wrappedBlamed) {
+    failures.push('the negative control failed, but not because of the transform on the ancestor — the probe is blaming the wrong thing')
+  }
+
   console.log('')
   if (failures.length === 0) {
     console.log('PASS: fill mode covers the whole viewport with no black bars')
     console.log(`      (whole-frame mode would leave ${contain.barX}px L/R, ${contain.barY}px T/B at this size)`)
+    console.log('PASS: the overlay box equals the viewport, no ancestor creates a containing block,')
+    console.log('      and all 5 sample points hit-test inside it')
+    console.log('      (negative control detected: a transform ancestor DOES break it)')
+    console.log('      scope: the DSH client WINDOW — not the OS screen (taskbar/desktop stay visible)')
   } else {
     console.log('FAIL:')
     for (const f of failures) console.log('  - ' + f)

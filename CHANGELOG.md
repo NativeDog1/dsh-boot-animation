@@ -5,6 +5,131 @@
 > Changes that a user can see, one section per release. English one-liners are
 > included so an English reader can scan the list.
 
+## 0.4.2 — 2026-10-02
+
+**新增：`每次启动 DSH 时播放一次` 开关（默认开）—— 修掉「片头是一次性的」**
+*New: a "play once per DSH launch" switch, on by default — fixes the one-shot intro.*
+
+客户反馈三条：「开了一次之后就再也没有见过」「是个一次性的」「插件脚本被覆盖了，没有生效」。
+前两条在本仓库里有真因，第三条不在（见下）。
+
+**1. 「一次性」的真因（本仓库代码问题）**：0.4.1 的规则是
+`isNewConversation && !hasPlayed(sessionId)`，也就是**按会话 id** 记「这个会话播过了」。
+后果是同一个会话里片头只播一次，之后**永远**不再出现 —— 而这恰好是最常见的用法
+（开 DSH、进同一个会话）。也就是说，装完当天见过一次，之后再也没见过。
+
+**修法不是偷偷改默认行为，而是把「什么时候播」做成一个用户能看见、能点的开关。**
+片库面板（页脚 **🎛**）里新增一行：
+
+```
+什么时候播：  [ 🚀 每次启动 DSH 时播放一次：开 / 关（只在新建会话时播） ]
+```
+
+- **开（默认值 = `true`）**：每次启动 DSH 应用时播一次。同一轮使用中切会话、新建会话
+  都不重复；下次打开 DSH 再播一次。记录写在 `sessionStorage` 的
+  `dsh-boot-animation:boot`（浏览器把它限定在一个标签页里、关掉标签页就清掉），
+  所以「一次」是**一次应用启动**，不是一个会话
+- **关（`false`）**：回到原来的行为 —— 只在**新建会话**时播一次（`isNewConversation && !hasPlayed(sessionId)`）
+- **被钉住的会话两者都不受影响**：钉住的会话仍然**每次进入都重播**，这个开关管不到它
+
+开关本身：
+
+- **设置存在宿主那边**，写进 `$DSH_HOME/boot-animation/selection.json` 的 `playOnAppStart`，
+  走既有的 `POST /select` + 原子写 + 损坏自愈路径。**不存 localStorage** ——
+  localStorage 按来源（host:port）隔离，DSH 端口一变设置就丢，这正是「设置没了」的一类成因
+- 界面上的开关状态**来自宿主的真实设置**：`/videos.json` 与 `/status.json` 都发布
+  `playOnAppStart`，客户端读回来显示。宿主还没答复之前**不做任何决定**（`settingsLoaded` 闸门），
+  免得对一个明确关掉开关的用户又播一次
+- schema 升到 **v4**，`defaultSelection()` / `migrate()` 接纳新字段：**缺字段 → `true`**
+  （这正是 v3 及更早版本本来就实现的规则，所以升级不改变行为），
+  **存了 `false` 就是 `false`**（把 `false` 收进默认值会让关掉的开关自己弹回来）。
+  非布尔值走默认值而不是被当真，写接口对非布尔值直接报错而不是静默当成 `true`
+- 规则本身从 React effect 里搬出来成为**纯函数** `decidePlay()`（`src/client/session.ts`），
+  副作用（写记录）拆到 `recordDecision()`，所以整套决策可以在测试里穷举，
+  而"播不播"仍然只有一条播放路径（都走 `playMode`）
+- **两个存储都被 try/catch 包住，失败回退到内存标记**：`localStorage` / `sessionStorage`
+  在隐私模式、被拦的第三方上下文、配额用尽时会**抛异常**，某些上下文里属性本身就不存在。
+  没有这层回退，一次读失败就等于「永远不播」，一次写失败就等于「每帧都播」
+- `hasPlayed()` / `markPlayed()` **保留并继续可用**（按会话的旧记录），
+  在开关关掉时是判据，在开关打开时是文档化的回退路径
+
+**2. 「脚本被覆盖了，没有生效」：不在本仓库，是宿主 / 安装器职责（没修，只记录）**。
+把三条可能都核过一遍：
+
+- 宿主的客户端 bundle 响应带 `cache-control: max-age=31536000, immutable`，而 URL 上的
+  `rev` 是**进程 nonce**、不随内容变化 —— 浏览器会一直用第一次抓到的副本，**普通 F5 不生效**，
+  必须 `Ctrl+Shift+R`。这一条 0.4.1 之前就写进 README 了，本次把它和「重启一次 DSH 服务」
+  一起放进排错表的同一行，并新增一节「装上了但没反应 / 脚本像没生效」逐条自查
+- `sessionStorage` / `localStorage` 按**来源（host:port）隔离**：DSH 端口一变就是另一个来源，
+  被钉的会话和旧记录全部读不到 —— 浏览器语义，插件绕不开。0.4.2 能做的是把**设置**从
+  localStorage 搬到宿主（见上），这类失效以后不再影响开关本身
+- 宿主**既没有动态注入、也没有 `uiSession`** 时，`src/client/index.ts` 走
+  `notify('idle: host offers no dynamic injection and no uiSession')` 然后**静默什么都不做**。
+  这是刻意的：静态 `inject` 一旦被宿主跳过会让整个 GUI 打不开（0.2.0 的实测事故）。
+  代价是「装上了但没反应」看起来就像「脚本没生效」。README 里写了怎么用这一行区分
+  「宿主问题」和「脚本根本没加载」
+
+**3. `scripts/verify-pin.mjs` 修正两处自身错误**（该脚本不在 `npm run check` 里）：
+它写的键是 `dsh-boot-animation:seen`，而真实键是 `:played`，所以「屏蔽自动播放、
+只剩 pin 规则」这个歧义消解**从来没有生效**；且 0.4.2 起自动播放的判据变了，
+要屏蔽得写 `sessionStorage` 的 `:boot`。
+
+**4. 覆盖范围：核对了，结论是「本来就对」，所以没有改代码**。浮层是
+`position:fixed;inset:0;z-index:2147483000`，覆盖的是 **DSH 客户端窗口**。
+`position:fixed` 只在祖先有 `transform` / `filter` / `perspective` / `contain` / `will-change`
+时才会退化成"盖住一块面板"；本插件插在宿主的 `shell.overlay` 槽位，而那个
+`data-shell-overlay` 层是 `position:absolute;inset:0`（读 `dsh-client-ui-layout` 的产物确认），
+**没有**这些属性。为避免只靠读代码下结论，`scripts/verify-letterbox.mjs` 增加了覆盖层断言，
+**并在本机真实 Edge 里跑通了**：
+
+```
+coverage[bare]  pos=fixed z=2147483000 viewport=[1574,807] box=[0,0,1574,807] ancestors=none
+hit[bare]       2,2→overlay  1571,2→overlay  2,804→overlay  1571,804→overlay  787,404→overlay
+```
+
+—— 矩形与视口逐像素相等，祖先链上没有包含块，四角与中心全部命中在浮层内部。
+同时加了一个**阴性对照页面**（把同一个浮层放进 `transform:translateZ(0)` 的祖先里），
+探针必须能看出它没铺满，否则"正面通过"没有意义：
+
+```
+coverage[wrapped-in-transform]  box=[0,0,420,260] ancestors=[{"tag":"div","offending":["transform: matrix(1, 0, 0, 1, 0, 0)"]}]
+hit[wrapped-in-transform]       1571,2→OUTSIDE:BODY  787,404→OUTSIDE:HTML
+```
+
+（阴性对照第一版还抓到我自己写的一个错误：`transform-style` 的中性值是 `flat` 而不是 `none`，
+把所有页面都误判成有包含块。已按属性各自的中性值比较。）
+
+**没有做**：没有把浮层 portal 到 `document.body`（没有需要绕过的祖先，改了只会动到
+一个已经正确的布局），也没有调 z-index。理由与**如实说明的限制**写进了 README 的
+「覆盖范围（说实话）」与排错表：`2147483000` 是本插件自己的值、不是全局最大值，
+**别的插件用更高的 z-index 我们压不过它**；覆盖范围是**客户端窗口**，
+**不是操作系统屏幕**（任务栏/桌面盖不住，这不是 Windows 开机画面）。
+
+工程与测试：`npm run check` 18 组全绿。新增三组：
+
+- `verify:boot-scope`（35 项）：启动记录的作用域与存储失败回退
+- `verify:play-decision`（31 项）：**开关开 / 关两种情况下的播放决策**、
+  钉住会话仍然重播、宿主设置未到达时不做决定，以及「同一轮不重复」由记账保证
+- `verify:app-start-setting`（23 项）：开关的默认值、`/select` 写入与读回、
+  非布尔值被拒且不改动原值、v3 旧文件迁移成 `true`
+- `verify:letterbox`（原本只量黑边）：**新增覆盖层覆盖范围断言** + 阴性对照，
+  在真实 Edge 里跑通（上面第 4 条的实测输出就是它的）
+
+三组都做过反向验证（故意改坏 → 必须以非 0 退出）：把 `hasBootPlayed` 读成 `localStorage`、
+把 `DEFAULT_PLAY_ON_APP_START` 改成 `false`，对应的组各报出 1 / 4+5 项失败。
+
+**改动的既有断言（逐条说明）**：
+
+- `verify-selection.mjs`：「a file of the current version is not reported as migrated」原本硬编码
+  `version: 3` + `migrated === false`。schema 升到 v4 后 v3 文件**必须**被报告为已迁移，
+  断言与新语义冲突，改为用 `SELECTION_VERSION` 拼出当前版本的文件，并把 v3 单独断言为
+  「migrated === true 且 `playOnAppStart` 拿到 `true`」—— 测的东西没变（当前版本不该被迁移），
+  只是不再把「当前版本」写死成 3
+- `verify-selection.mjs` / `verify-conversation-override.mjs`：settings 文件「精确键集合」
+  断言补上 `playOnAppStart`。它们要守的是「session id 不会变成顶层字段」，键集合本身随 schema
+  变化，所以是把新键加进白名单而不是放宽
+- `verify-pin.mjs`（不在 `npm run check` 里）：见上第 3 条
+
 ## 0.4.1 — 2026-10-01
 
 **修复：安装时的 `connection to github.com timed out after 5000ms` —— 并把这个错误的含义写进文档**

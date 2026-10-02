@@ -5,9 +5,10 @@ you pinned — a video plays full-frame in the app window.
 
 > 中文: [README.md](README.md)
 
-- Plays **once per new conversation** by default
+- **Plays once per DSH launch** by default (0.4.2); this is a **switch** you can turn off to
+  get the original "once per new conversation" behaviour
 - **Or every time** you open a conversation you pinned (one click in the sidebar footer)
-- Fills the whole window, skippable, closes itself when it ends
+- Fills the whole **client window**, skippable, closes itself when it ends
 - **Bring your own video** (three ways, below)
 
 ## Install
@@ -61,7 +62,33 @@ Press **Ctrl+Shift+R** (hard reload) in the app window. A plain F5 is not enough
 
 ## Usage
 
-**New conversations** play it automatically, once each.
+### When it plays is a switch (new in 0.4.2)
+
+The clip library (the **🎛** button at the sidebar foot) has a row that says it plainly:
+
+```
+什么时候播：  [ 🚀 每次启动 DSH 时播放一次：开 / 关（只在新建会话时播） ]
+```
+
+| Switch | Behaviour |
+|---|---|
+| **On** (default) | **Once per DSH launch**, in the first conversation you enter. Switching or creating conversations during that launch does not replay it; the next launch plays it again |
+| **Off** | The original rule: once per **new conversation**, one record per session |
+
+- The record lives in `sessionStorage` (`dsh-boot-animation:boot`) — tab-scoped and dropped when
+  the tab closes — so with the switch on, "once" means once per application launch
+- **A pinned conversation is unaffected either way**: it replays on every entry, and the switch
+  cannot suppress it
+- The switch itself is stored **on the host** (`playOnAppStart` in
+  `$DSH_HOME/boot-animation/selection.json`), not in localStorage: localStorage is partitioned per
+  origin, so a DSH port change would drop the setting
+- The UI shows the value read back **from the host**; until the host answers, the client makes no
+  playback decision at all
+
+> Up to 0.4.1 the rule was hard-wired to "once per conversation", which meant the intro played
+> once and then never again in that conversation — the field report was "一次性的". 0.4.2 makes it
+> your choice and defaults to once-per-launch, so **the default behaviour did change**; turn the
+> switch off if you want the old rule.
 
 **Pin a conversation** to replay it on *every* open:
 
@@ -152,13 +179,33 @@ visually fullscreen), and **one click** unmutes it *and* enters real fullscreen.
 If even muted autoplay is refused, a "click to play" state is shown instead of a
 black screen.
 
+## What it actually covers (stated plainly)
+
+- The overlay is `position:fixed;inset:0;z-index:2147483000`, covering the **DSH client window** —
+  the whole area where you see the sidebar and the conversation
+- **It cannot cover the OS screen.** The Windows taskbar, the desktop, and other applications
+  stay above it. **This is not a Windows boot splash** and does not replace system startup: it is
+  this application's own intro
+- The overlay's rectangle equals the viewport pixel for pixel and its four corners plus centre
+  hit-test inside it; `scripts/verify-letterbox.mjs` measures exactly that in a real browser
+- **Another plugin with a higher z-index will cover us.** `2147483000` is our own value, not a
+  global maximum, and host surfaces live in the same range. When something sits on top of the
+  intro, that is two overlays disagreeing about layering; this plugin does not rewrite other
+  plugins' values and does not claim to always be on top
+- The library modal's veil is `2147483200`, deliberately 200 above the overlay: opening the
+  library must cover the clip that is playing
+
 ## Troubleshooting
 
 | Symptom | Cause / fix |
 |---|---|
-| Nothing appears at all | Almost always the cache: **Ctrl+Shift+R**, or restart DSH |
-| New conversation does not play | That conversation already played it (once per conversation). Pin it to replay every time |
+| Nothing appears at all | Almost always the cache: **Ctrl+Shift+R** (a plain F5 is not enough), plus restart the DSH service after installing/upgrading |
+| It played once and never again | The 0.4.1 bug: "once per conversation". 0.4.2 defaults to once per DSH launch; check the switch in the library is on |
+| It never plays (suspect "the script did not take effect") | Check the browser console for `[dsh-boot-animation]`: a line saying `idle: host offers no dynamic injection and no uiSession` means the host is the problem, not the plugin. No plugin output at all means it was not loaded — hard-reload, and confirm it is installed |
 | Pinned but still nothing | Check the pin is green, and that you opened the pinned conversation |
+| The intro covers one panel instead of the window | Should not happen: the overlay is `position:fixed`, which only degrades if an ancestor has `transform` / `filter` / `perspective` / `contain` / `will-change`. Run `npm run verify:letterbox` to measure it |
+| Something is drawn on top of the intro | Another overlay has a higher z-index (ours is `2147483000`). We do not outrank other plugins' overlays and will not raise global layering to do it |
+| I want it to cover the taskbar / the whole screen | Not possible and not intended: the scope is the **DSH client window**, not the OS screen |
 | Black screen | Open `/dsh-boot-animation/status.json` to see whether a source was found; check the console for a decode error |
 | One conversation plays the wrong clip | That conversation may carry a 「仅本会话」 pin: open the picker and press 「取消（回到全局）」 at the top |
 | A conversation's pinned clip vanished | The clip it named was moved or deleted — that conversation fell back to the global choice; `status.json` shows `conversation-override-stale` |
@@ -172,10 +219,13 @@ black screen.
   React-friendly store whose snapshot is the **resolved descriptor output**
   `{ key, hooks, keyedHooks, props }` — the id is at `props.sessionId` and the
   session snapshot at `hooks.session`
-- "Brand new conversation" is **`blankBit`** on that snapshot (`session.blank`
-  lives on another package's projected summary, not here)
-- "Every open" is implemented by watching **entry into** a conversation rather
-  than remembering that it played, so a pinned conversation ignores the seen list
+- "Brand new conversation" is `session.getSnapshot().blank` on the modern Session face, with the
+  pre-0.2.0 `blankBit` on the binding still read as a fallback
+- The when-to-play rule is the pure function `decidePlay` (`src/client/session.ts`), so the whole
+  matrix (switch on/off, pinned, settings not yet loaded) is exercised as data by
+  `verify-play-decision.mjs` rather than inferred from a rendered overlay
+- "Every open" is implemented by watching **entry into** a conversation rather than remembering
+  that it played, so a pinned conversation ignores both the launch record and the seen list
 - The video route honours **Range** requests; browsers send them for media and
   may refuse to play when a 200 arrives where a 206 was expected
 

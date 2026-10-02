@@ -91,6 +91,7 @@ export const CSS = `
 .dba-fit{display:flex;align-items:center;gap:8px;margin-top:12px;
   font-size:12px;color:var(--dsw-alias-text-secondary,#777)}
 .dba-fit .dba-flex{flex:1}
+.dba-fit .dba-note{font-size:11px;opacity:.8}
 .dba-btn.dba-btn-on{border-color:rgba(7,193,96,.6);background:rgba(7,193,96,.12);color:#07974b}
 .dba-btn{border:1px solid rgba(127,127,127,.34);background:transparent;color:inherit;
   border-radius:8px;padding:5px 14px;font-size:12.5px;font-family:inherit;cursor:pointer}

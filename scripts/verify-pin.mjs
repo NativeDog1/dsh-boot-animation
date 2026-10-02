@@ -1,9 +1,21 @@
 /**
  * verify-pin.mjs - prove the pinned conversation replays the intro EVERY open.
  *
- * Disambiguation trick: the new-conversation rule is suppressed by marking the
- * session as already seen, so if the overlay still comes up after a fresh page
- * load into that conversation, only the PIN rule can be responsible.
+ * Disambiguation trick: the boot-scope rule (the auto-play path) is disarmed
+ * first, so if the overlay still comes up after a fresh page load into the
+ * pinned conversation, only the PIN rule can be responsible.
+ *
+ * Two corrections in 0.4.2, both of which had made this script lie:
+ *   - the per-session key is `dsh-boot-animation:played`, not `...:seen`
+ *   - the auto-play rule is no longer per session at all
+ *
+ * IMPORTANT: since 0.4.2 the auto-play rule defaults to "once per DSH launch", and
+ * this script keeps its own boot record (`dsh-boot-animation:boot`) so that rule is
+ * already spent by the time it reloads. That is what leaves the PIN rule as the only
+ * remaining reason for the overlay to come up. To isolate the pin even from a client
+ * whose boot record may have been cleared, turn the switch OFF in the library panel
+ * first — with `playOnAppStart` off, a running conversation cannot auto-play at all.
+ * The complete decision matrix is asserted offline in `verify-play-decision.mjs`.
  *
  * Usage: node scripts/verify-pin.mjs <debugPort> <guiUrl>
  */
@@ -93,7 +105,9 @@ async function waitTrue(client, expression, timeoutMs) {
 }
 
 const PIN = `window.localStorage.getItem('dsh-boot-animation:pinned')`
-const SEEN = `window.localStorage.getItem('dsh-boot-animation:seen')`
+// The auto-play path is boot-scoped since 0.4.2: this is the record that has to
+// be present for a fresh load to skip it.
+const BOOT = `window.sessionStorage.getItem('dsh-boot-animation:boot')`
 
 const page = await waitForPage()
 const client = await connect(page.webSocketDebuggerUrl)
@@ -133,26 +147,25 @@ await sleep(600)
 const after = await evaluate(client, `JSON.stringify({ pinned: ${PIN}, cls: document.querySelector('.dba-pin').className })`)
 console.log('  pin after        :', after)
 
-// 3. Block the new-conversation rule for that session.
+// 3. Disarm the boot-scope (auto-play) rule so only the PIN rule is left.
 const armed = await evaluate(
   client,
   `(() => {
      const pinned = ${PIN};
      if (!pinned) return 'no pin';
-     window.localStorage.setItem('dsh-boot-animation:seen', JSON.stringify([pinned]));
-     return JSON.stringify({ pinned, seen: JSON.parse(window.localStorage.getItem('dsh-boot-animation:seen')) });
+     window.sessionStorage.setItem('dsh-boot-animation:boot', String(Date.now()));
+     return JSON.stringify({ pinned, boot: ${BOOT} });
    })()`,
 )
-console.log('3 suppress new-conv:', armed)
+console.log('3 disarm boot scope:', armed)
 
-// 4. Fresh load straight into the pinned conversation.
-await evaluate(client, `window.localStorage.removeItem('dsh-boot-animation:seen')`)
-await evaluate(client, `window.localStorage.setItem('dsh-boot-animation:seen', JSON.stringify([${PIN}]))`)
+// 4. Fresh load straight into the pinned conversation. sessionStorage survives a
+// navigation within the same tab, which is exactly the "same DSH launch" case.
 await load()
 
 const state = await evaluate(
   client,
-  `JSON.stringify({ pinned: ${PIN}, seen: ${SEEN}, pinDisabled: document.querySelector('.dba-pin') ? document.querySelector('.dba-pin').disabled : null })`,
+  `JSON.stringify({ pinned: ${PIN}, boot: ${BOOT}, pinDisabled: document.querySelector('.dba-pin') ? document.querySelector('.dba-pin').disabled : null })`,
 )
 console.log('4 after reload     :', state)
 

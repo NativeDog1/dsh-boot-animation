@@ -1,10 +1,10 @@
 # dsh-boot-animation
 
-给 DSH 加一段**开机动画**：打开一个新对话、或打开你指定的那个会话时，视频铺满整个窗口播放。
+给 DSH 加一段**开机动画**：每次打开 DSH 播一次，视频铺满整个窗口。
 
 > English: [README.en.md](README.en.md)
 
-- **一个会话只播一次**（新对话默认行为）
+- **每次启动 DSH 播一次**（0.4.2 起；在这之前是「每个新会话一次」，所以看起来像一次性的）
 - **指定会话每次打开都播** —— 在侧边栏页脚点一下图钉即可
 - **铺满窗口**、可跳过、放完自动关闭
 - **可以换自己的片子**（三种方式，见下）
@@ -55,9 +55,33 @@ DSH 的客户端 bundle 响应带 `cache-control: max-age=31536000, immutable`�
 
 ## 用法
 
-### 新对话自动播
+### 「什么时候播」是一个开关（0.4.2 新增）
 
-打开一个还没说过话的新对话时会自动播一次。
+片库面板（页脚 **🎛**）里有一行明确写着：
+
+```
+什么时候播：  [ 🚀 每次启动 DSH 时播放一次：开 / 关（只在新建会话时播） ]
+```
+
+| 开关 | 行为 |
+|---|---|
+| **开**（默认） | **每次启动 DSH 应用时播一次** —— 在启动后你进入的那个对话里播。同一轮使用中切会话、新建会话都不重复；下次打开 DSH 再播一次 |
+| **关** | 回到原来的行为：只在**新建会话**时播一次（一个会话记一次，之后不再播） |
+
+- 记录写在 `sessionStorage`（`dsh-boot-animation:boot`），浏览器把它限定在一个标签页里、
+  关掉标签页就清掉，所以开关打开时的「一次」= **一次应用启动**，而不是「一个会话」
+- **被钉住的会话两种模式下都一样**：钉住的会话仍然每次进入都重播，这个开关管不到它
+- **开关本身存在宿主那边**（`$DSH_HOME/boot-animation/selection.json` 的 `playOnAppStart`），
+  不存 localStorage —— localStorage 按来源（`host:port`）隔离，DSH 换个端口设置就丢了
+- 界面上的开关状态是**读回宿主设置**显示的；宿主还没答复之前插件不做任何播放决定
+
+> 0.4.1 及之前没有这个开关，固定是「每个会话只播一次」—— 于是同一个会话里片头只播一次、
+> 之后**永远**不再出现。这就是「开了一次之后就再也没有见过」「是个一次性的」的成因。
+> 0.4.2 把规则交给你选，默认值是新的「每次启动播一次」，所以**默认行为变了**：
+> 如果你要的是老行为，把开关关掉即可。
+>
+> 直接按 F5 刷新页面**会**再播一次（开关打开时）：sessionStorage 在同一个标签页里能扛过刷新。
+> 如果你连着刷新好几次都看得到，那不是 bug。
 
 ### 让某个会话每次打开都播（推荐）
 
@@ -66,6 +90,7 @@ DSH 的客户端 bundle 响应带 `cache-control: max-age=31536000, immutable`�
 3. 图标变绿 **🎬** = 已钉住
 
 之后**每次**进入这个会话都会播一遍 —— 切走再切回来、刷新页面，都会重播。
+无论上面那个开关是开还是关，都一样。
 
 再点一下图标取消。
 
@@ -131,7 +156,7 @@ PSNR 44–48 dB —— 这是「肉眼看不出差别」的区间。原片另存
 2. 在侧边栏页脚点 **🎛**（在 🎞 图钉旁边）打开「片头片库」
 3. 点一下你想播的那一条
 
-选中的那段会在**下一次**播放片头时登场：新对话、以及你钉住的会话。
+选中的那段会在**下一次**播放片头时登场：下次启动 DSH、以及你钉住的会话。
 
 > Windows 上就是 `C:\Users\<你>\.dsh\boot-animation\videos\`
 > 具体路径以片库面板底部显示的那一行为准。
@@ -163,10 +188,10 @@ PSNR 44–48 dB —— 这是「肉眼看不出差别」的区间。原片另存
 
 片头动画的触发**故意很窄**：
 
-- **新对话**：只播**一次**（记住播过的会话，不会重复打扰）
+- **启动 DSH**：整轮启动只播**一次**（0.4.2 起；记录在 `sessionStorage`）
 - **钉住的会话**：每次打开都播
 
-所以在**同一个新对话里刷新页面**，片子**本来就不会重播** —— 这很容易被误认为
+所以**在同一个会话里切来切去**，片子**本来就不会重播** —— 这很容易被误认为
 "我换了片子但另一个视频不出现"。点片库里的 **▶ 预览当前** 可以立刻播放选中的那段，
 确认换对了没有。
 
@@ -258,19 +283,77 @@ ffprobe -v trace 修好的.mp4 2>&1 | grep -m1 moov   # 偏移应该很小
 2. **点一下画面**：同时开启声音并进入**真全屏**
 3. 万一连静音自动播放也被拒，会显示「点击播放」而不是黑屏
 
+## 覆盖范围（说实话）
+
+- 浮层是 `position:fixed;inset:0;z-index:2147483000`，覆盖的是 **DSH 客户端窗口**
+  —— 也就是你能看到侧边栏、对话框的那一整块区域
+- **它盖不住操作系统的屏幕**。Windows 的任务栏、桌面、别的应用窗口都在它上面。
+  **这不是 Windows 开机画面**，也不会替代系统启动过程 —— 它是 DSH 这个应用自己的片头
+- 覆盖层的矩形与视口逐像素相等、四个角与中心都命中在它内部，这一点由
+  `scripts/verify-letterbox.mjs` 在真实浏览器里量过（见「验证脚本」一节）
+- **别的插件如果用更高的 z-index，我们压不过它**。`2147483000` 是我们自己的值，
+  不是全局最大值；宿主自己的部分浮层也在同一量级。真遇到有东西盖在片头上，
+  那是两个浮层的层级之争，本插件不改别人的值，也不声称"一定在最上层"
+- 库面板（片库）的遮罩是 `2147483200`，**刻意比浮层高 200**：
+  打开片库时它必须盖在正在播的片头之上
+
 ## 排错
 
 | 现象 | 原因 / 处理 |
 |---|---|
-| 完全没出现 | 十有八九是缓存：**Ctrl+Shift+R**。或重启一次 DSH 服务 |
-| 新对话不播 | 这个会话已经播过了（每个会话只播一次）。钉住它可变成每次都播 |
+| 完全没出现 | 十有八九是缓存：**Ctrl+Shift+R**（普通 F5 不够）。升级/装完还要**重启一次 DSH 服务** |
+| 装完当天见过一次，之后再也没见过 | **0.4.1 及之前的 bug**：那时是「每个会话只播一次」。升到 0.4.2 后是「每次启动 DSH 一次」。还不行就看下一行 |
+| 一直不播（怀疑"脚本没生效"） | 见下面「装上了但没反应 / 脚本像没生效」一节，三条可能逐条排除 |
 | 钉住了也不播 | 确认图钉是绿色；确认打开的就是被钉的那个会话 |
 | 黑屏无画面 | 先看 moov 是否前置（见上「排错：视频是黑的」）；再访问 `/dsh-boot-animation/status.json` 看片源；最后看浏览器控制台有没有解码错误 |
 | 换了片没生效 | 片库里点完要有 ✓ 才生效；确认文件在 `videos/` 里并点了「刷新」 |
 | 只有一个会话播的不是你选的 | 那个会话可能有「仅本会话」覆盖：打开片库看顶部那条，点「取消（回到全局）」 |
 | 某个会话的固定片头突然没了 | 它指的片段被移走或删除了 —— 该会话已回落到全局；`status.json` 里能看到 `conversation-override-stale` |
 | 播到一半自己没了 | 25 秒看门狗（`STALL_TIMEOUT_MS`）超时 —— 通常还是 faststart 或解码太慢 |
+| 片头只盖住一块面板，没铺满窗口 | 这**不该发生**：浮层是 `position:fixed`，只有祖先里有 `transform` / `filter` / `perspective` / `contain` / `will-change` 时才会退化成盖一块面板。跑 `npm run verify:letterbox` 量一下；插件自身不设置这些属性 |
+| 有东西盖在片头上面 | 另一个浮层的 z-index 更高（我们的是 `2147483000`）。**本插件不保证压过别人的浮层**，也不会为了压过它去改全局层级 |
+| 想让片头盖住任务栏 / 整个屏幕 | 做不到，也不该做：覆盖范围是 **DSH 客户端窗口**，不是操作系统屏幕。这不是开机画面 |
 | 想看到插件在干什么 | 把 `src/client/index.ts` 顶部的 `DEBUG` 改成 `true` 重新构建，控制台会打印每次决策 |
+
+### 装上了但没反应 / "插件脚本像是被覆盖了、没生效"
+
+这一条**多半不是本插件能修的**：下面是三个已知原因，都能自查。请按顺序排除，
+**不要**把「看起来像被覆盖」直接当成代码 bug。
+
+**① 浏览器缓存（最常见）。** 宿主给客户端 bundle 的响应头是
+`cache-control: max-age=31536000, immutable`，而 URL 上的 `rev` 是**进程 nonce**、
+**不随内容变化**。所以浏览器会一直用**第一次抓到的那份**，装新版本也一样。
+
+- 处理：在新窗口里按 **Ctrl+Shift+R**（硬刷新）。普通 F5 不够。
+- 再确认：装完/升级后**重启一次 DSH 服务**（`dsh web`）—— bundle 层是启动时装配的。
+
+**② 换了端口（或 `localhost` ↔ `127.0.0.1`）—— 这是浏览器语义，插件绕不开。**
+`localStorage` 和 `sessionStorage` 都按**来源（`scheme://host:port`）隔离**。
+DSH 换端口 = 换来源 = 之前「钉住的会话」和「已播记录」**一个都读不到**：
+
+```js
+// 在 GUI 的开发者工具里粘一下，看当前来源和记录
+location.origin
+JSON.stringify({ boot: sessionStorage.getItem('dsh-boot-animation:boot'),
+                 pinned: localStorage.getItem('dsh-boot-animation:pinned') })
+```
+
+`boot` 为 `null` 且**没有**播片头 → 记录其实在另一个来源下。重新钉一次即可。
+
+**③ 宿主没提供插件需要的槽位。** 本插件的两个服务（`slots` / `uiSession`）走
+**动态注入**；宿主既不支持动态注入、又没有 `uiSession` 时，插件会**静默闲置**，
+不报错也不挂载。这是刻意的（静态注入一旦被宿主跳过，**整个 GUI 会打不开**，有实测事故），
+但症状确实很像"脚本没生效"：
+
+```js
+// 控制台里应该能看到这一行（插件每次加载都会打，与 DEBUG 无关）
+// [dsh-boot-animation] idle: host offers no dynamic injection and no uiSession
+```
+
+- 看到这一行 → 是宿主/版本问题，不是本插件。先确认 DSH 版本在该支持线内（见上表）。
+- **没看到任何 `[dsh-boot-animation]` 输出** → 脚本根本没被加载，
+  这时才该怀疑插件确实没装上/被跳过（例如兼容闸门跳过、或安装副本过期）。
+  用 `dsh plugin --profile web list` 确认它在列表里，再 Ctrl+Shift+R。
 
 ## 实现速记（给维护者）
 
@@ -336,6 +419,19 @@ ffprobe -v trace 修好的.mp4 2>&1 | grep -m1 moov   # 偏移应该很小
 - **prefix 路由不能带尾部斜杠**：webserver 用
   `pathname !== prefix && !pathname.startsWith(prefix + '/')` 匹配，注册
   `.../media/` 会被当成 `.../media//`，永远匹配不上（曾导致 /media/<id> 全 404）
+- **「什么时候播」是一条纯函数**：`decidePlay()`（`src/client/session.ts`）吃下
+  sessionId / 是否刚进入 / 宿主设置是否到达 / `playOnAppStart` / 是否被钉 / 是否新会话 /
+  两个记录，吐出 `none | play(pinned | app-start | new-conversation)`。副作用（写记录）
+  在 `recordDecision()` 里，UI 只负责收集输入和调 `playMode()`。这样决策矩阵可以在测试里
+  穷举（`verify-play-decision.mjs`），而不是靠渲染一个浮层去反推
+- **设置到达之前不做决定**：`snapshot.settingsLoaded` 为假时 `decidePlay` 一律返回 `none`。
+  默认值猜错任何一边都会让"明确关掉开关的人"又被播一次
+- 覆盖层**不依赖祖先的层叠上下文**：它插在 `shell.overlay` 槽位里，而宿主那个
+  `data-shell-overlay` 层是 `position:absolute;inset:0`，**没有** `transform` / `filter` /
+  `contain` / `will-change`，所以 `position:fixed` 真的以视口为包含块。
+  这条不靠读代码保证：`verify-letterbox.mjs` 会走一遍真实祖先链，
+  并且用一个 `transform:translateZ(0)` 包裹的**反例页面**做阴性对照 ——
+  探针必须能看出反例没铺满，否则"正面通过"没有意义
 
 ## 验证脚本（改完跑一遍）
 
@@ -343,8 +439,12 @@ ffprobe -v trace 修好的.mp4 2>&1 | grep -m1 moov   # 偏移应该很小
 |---|---|
 | `npm run verify:routes` | 用**服务器自己的匹配规则**驱动真实 handler，断言每条路由 |
 | `npm run verify:conversation` | 按会话覆盖的完整行为：只对自己生效、不碰全局选择、压过随机但不压过 `mode=random`、片段失效时回落并记录、只公布发问者的钉住、校验与上限 |
-| `npm run verify:letterbox` | 用 CDP 驱动本机 Edge，量出所选贴合方式实际留多少黑边 |
-| `npm run check` | 上面全部 15 组（build / routes / selection / conversation / cache / blank / boot / preview / playback / random / fallback / install / teardown / version-refresh / session-id） |
+| `npm run verify:boot-scope` | 启动记录的作用域（sessionStorage）、存储抛异常 / 不存在时回退到内存 |
+| `npm run verify:play-decision` | 「什么时候播」的决策矩阵：开关开 / 关、钉住会话、宿主设置未到达、同一轮不重复 |
+| `npm run verify:app-start-setting` | 开关作为宿主设置的完整往返：默认 true、`/select` 写入与读回、非布尔被拒、v3 旧文件迁移 |
+| `npm run verify:letterbox` | 用 CDP 驱动本机 Edge，量出所选贴合方式实际留多少黑边，并**量出覆盖层是否等于视口 + 四角/中心命中测试 + 阴性对照** |
+| `npm run verify:boot-animation` / `verify:pin` | 真 GUI 端到端（`npm run verify:gui-boot` / `verify:gui-pin`；需要带 `--remote-debugging-port` 的 DSH GUI，**不是** `npm run check` 的一部分）。`gui-boot` 也会量一遍覆盖层 |
+| `npm run check` | 上面全部 **18 组**（build / routes / selection / conversation / cache / blank / boot / boot-scope / play-decision / app-start-setting / preview / playback / random / fallback / install / teardown / version-refresh / session-id） |
 | `npm run build:client` | 先跑 CSS 检查再构建（防带病构建） |
 
 两个脚本都是被真实 bug 逼出来的，各自都有过一次"用自己的规则测自己"的教训：

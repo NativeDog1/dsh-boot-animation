@@ -1,5 +1,5 @@
 {
-  "builtAt": "2026-10-02T11:24:19.711Z",
+  "builtAt": "2026-10-02T11:41:23.296Z",
   "host": [
     "clip-id.js",
     "clip-registry.js",
@@ -11,5 +11,5 @@
     "random-controller.js",
     "selection-store.js"
   ],
-  "clientBundleBytes": 45381
+  "clientBundleBytes": 55236
 }

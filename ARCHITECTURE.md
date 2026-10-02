@@ -21,7 +21,7 @@ src/
   client/                   浏览器半边：TS，tsdown 打成 lib/client.js
     index.ts                接线：dynamic inject + 挂载两个 slot
     store.ts                ClientStore：客户端唯一数据源
-    session.ts              uiSession 绑定（blank 双形状）+ pin/已播记录
+    session.ts              uiSession 绑定（blank 双形状）+ pin/启动/已播记录 + decidePlay 纯函数
     ui.ts                   三个界面：BootOverlay / VideoLibrary / PinAction
     styles.ts               样式表（模板字符串，有 check-css-template 防呆）
     diagnostics.ts          客户端诊断
@@ -234,11 +234,17 @@ Range：`206` + `content-range` + `accept-ranges`；后缀式、开区间、不�
 | `shell.overlay` / `sidebar.footer.action` | 未变（都是 list slot，只增不替） |
 | Range / ETag / faststart | 未变（这些本来就对，只是搬进了 MediaServer） |
 | 客户端 `fit` 存在 localStorage | 改为 `selection.json` 的 `fitMode`；迁移时若旧文件带 `fit` 会被读入 |
+| `selection.json` v2/v3 | 迁移到 **v4**；v3 及更早补 `playOnAppStart: true`（= 它们本来就实现的规则），存了 `false` 的仍然是 `false` |
+| 「每个会话只播一次」 | 0.4.2 起默认是「**每次启动 DSH 一次**」，并把它做成 `playOnAppStart` 开关（关掉即回到旧规则）。**默认行为变了**，见 CHANGELOG 0.4.2 |
 
 **未变的行为由既有测试守住**：`verify-routes.mjs`（5 片段/5 独立 artifact、失败不可缓存、
 跨片段 ETag 必须 200）、`verify-blank.mjs`（13 种 host 形状）、`verify-client-boot.mjs`
-（11 项 boot 安全）、`verify-letterbox.mjs`（真浏览器黑边）、`verify-boot-animation.mjs`
-与 `verify-pin.mjs`（真 GUI 端到端，需要调试端口）。
+（11 项 boot 安全）、`verify-letterbox.mjs`（真浏览器黑边 **+ 覆盖层是否等于视口 + 阴性对照**）、
+`verify-boot-animation.mjs` 与 `verify-pin.mjs`（真 GUI 端到端，需要调试端口）。
+
+**0.4.2 新增**：`verify-boot-scope.mjs`（启动记录作用域 + 存储失败回退）、
+`verify-play-decision.mjs`（`decidePlay` 的决策矩阵）、
+`verify-app-start-setting.mjs`（`playOnAppStart` 的宿主往返与迁移）。
 
 ## 不变量清单（改动前请读）
 
@@ -258,3 +264,16 @@ Range：`206` + `content-range` + `accept-ranges`；后缀式、开区间、不�
 13. 只公布**发问那个会话**的钉住；整张 `conversationOverrides` 不出主机。
 14. 钉住指向的片段不可用时**回落常规链**并记事件 —— 绝不报错、绝不黑屏、
     也绝不把那条钉住删掉（文件回来时它自动复活）。
+15. 「什么时候播」只能由 `decidePlay()` 决定，副作用只能由 `recordDecision()` 写；
+    组件里不得再有第二处 `if` 判断。宿主设置未到达（`settingsLoaded === false`）时
+    **不做任何决定** —— 猜任何一边都会违背用户明确的开关。
+16. 用户设置（含 `playOnAppStart`）**必须存在宿主的 `selection.json`**，不得只存
+    localStorage（按来源隔离，换端口就丢）。旧文件缺字段 → 默认值 `true`；
+    存了 `false` 必须保持 `false`（不得被默认值吞掉）。
+17. 启动记录（`sessionStorage`）与已播记录（`localStorage`）**必须都容错**：
+    存储抛异常或不存在时回退到内存标记，绝不出现"永远不播"或"每帧都播"。
+18. 覆盖层**不得依赖祖先的层叠上下文**：`position:fixed` 的包含块必须是视口。
+    真实祖先链上出现 `transform` / `filter` / `perspective` / `contain` / `will-change`
+    时，`verify-letterbox.mjs` 的阴性对照会失败 —— 那是信号，不是噪声。
+19. 覆盖范围是 **DSH 客户端窗口**，不是操作系统屏幕；不得在任何文案里暗示这是开机画面，
+    也不得声称一定压过别的插件的浮层。
