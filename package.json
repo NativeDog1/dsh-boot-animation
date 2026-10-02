@@ -1,6 +1,6 @@
 {
   "name": "dsh-boot-animation",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "打开新对话（或你钉住的会话）时，铺满窗口播放一段片头开机动画。Open a new (or a pinned) DSH conversation and a full-frame intro animation plays.",
   "type": "module",
   "main": "./lib/index.js",

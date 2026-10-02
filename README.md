@@ -358,3 +358,28 @@ ffprobe -v trace 修好的.mp4 2>&1 | grep -m1 moov   # 偏移应该很小
 ## 许可
 
 BSD-3-Clause，见 [LICENSE](LICENSE)。包内 `lib/clips.data.js` 里的内嵌片源以相同条款分发。
+
+## 安装时报 `connection to github.com timed out after 5000ms`
+
+如果安装插件时看到这样的提示：
+
+```
+任务 ① 安装 dsh-boot-animation
+{"code":"operation-error","diagnostic":"dsh: connection to github.com timed out after 5000ms"}
+```
+
+**这不是插件坏了。** 这一行是 DSH 在**拉取插件**时自己报的：它在 5 秒内没能从 github.com 取到东西。
+插件运行时代码里没有任何访问 github.com 的请求 —— 它的 `fetch` 全部指向自己的本地路由，超时常量是 25 秒的卡顿检测，
+和这里的 `5000ms` 没有关系。
+
+常见原因与处理：
+
+1. **网络到 github.com 不通或很慢**（国内尤其常见）。先做的是：**再装一次**；仍然失败就换网络（手机热点试一下）、
+   或挂上代理后重试。
+2. **不想走网络**：把仓库克隆到本地，用本地路径安装，例如
+   `dsh plugin add <你克隆下来的目录>`。走本地路径不需要连 github.com。
+3. **安装包体积**：这个仓库里带着插件自带的四段片头（`lib/clips.data.js` 约 12 MB，是把视频内嵌进代码里的结果）。
+   在慢网络上，这个体积本身也会把 5 秒的窗口撑爆。0.4.1 已把仓库里两个无关的大文件删掉（见 CHANGELOG），
+   安装时传输的体积因此明显变小。
+
+如果你确认网络正常、重试多次仍失败，请把上面那段 `diagnostic` 原文贴到 issue 里 —— 里面有 DSH 报的原始原因。

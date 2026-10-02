@@ -5,6 +5,35 @@
 > Changes that a user can see, one section per release. English one-liners are
 > included so an English reader can scan the list.
 
+## 0.4.1 — 2026-10-01
+
+**修复：安装时的 `connection to github.com timed out after 5000ms` —— 并把这个错误的含义写进文档**
+*Fix: the install-time github.com timeout, and document what that error actually means.*
+
+客户在安装时遇到：
+
+```
+{"code":"operation-error","diagnostic":"dsh: connection to github.com timed out after 5000ms"}
+```
+
+查过之后，**这不是插件里的错误代码**：插件自己的 `fetch` 全部指向它自己的本地路由（相对地址），
+超时常量是 25 秒的卡顿检测，与报错里的 5 秒无关；报错前缀 `dsh:` 说明是 DSH 在**拉取插件**时连不上 github.com。
+
+我一开始以为可以靠删大文件解决，核对后发现那两个大文件（`dsh-boot-animation-0.2.4.tgz`、
+`boot.mp4.original-backup`）**只存在于本地、从未被提交**，安装时根本没有传输它们 ——
+所以「删掉后体积减少 12 MB」这个说法不成立，已在此更正（原来那句话是我没核对就写下的）。
+
+安装真正传输的是仓库里**被跟踪**的内容：内嵌片头的 `lib/clips.data.js`（约 12 MB）与构建输入
+`media/`（约 9 MB）。前者就是插件的功能本身（四段片头内嵌在代码里、不带独立视频文件），
+后者用于重新生成前者 —— 两者都不宜为了安装体积而删除。所以这次**不是靠缩小体积修的**，
+而是把「这个报错到底是什么意思、该怎么办」写清楚。
+
+同时在 README 里补了「安装超时」一节：说明这个报错的含义、为什么与插件代码无关，以及三种处理方式
+（重试 / 用代理 / 用本地路径安装）。以前这个报错在文档里没有任何解释，客户只能猜。
+
+**本次没有改动任何运行时行为**：ClipId、媒体路由、选择与随机逻辑、客户端与服务端模块都保持原样；
+只删了两个无关文件、补了文档、升了版本号（补丁号）。
+
 ## 0.4.0 — 2026-09-30
 
 **新增：按会话固定片头 —— 全局选择之外再加一层，只对某一个会话生效**
