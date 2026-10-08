@@ -13,7 +13,7 @@
 export const STYLE_ID = 'dsh-boot-animation-style'
 
 export const CSS = `
-.dba-root{position:fixed;inset:0;z-index:2147483000;background:#000;
+.dba-root{position:fixed;inset:52px 0 0;z-index:2147483000;background:#000;
   display:flex;align-items:center;justify-content:center;
   pointer-events:auto;cursor:pointer;overflow:hidden}
 .dba-video{width:100%;height:100%;object-fit:contain;background:#000;display:block}
