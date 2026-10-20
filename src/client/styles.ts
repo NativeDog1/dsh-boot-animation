@@ -16,6 +16,24 @@ export const CSS = `
 .dba-root{position:fixed;inset:0;z-index:2147483000;background:#000;
   display:flex;align-items:center;justify-content:center;
   pointer-events:auto;cursor:pointer;overflow:hidden}
+/* The desktop shell draws the Windows caption buttons NATIVELY: the main window is
+   created with titleBarStyle:"hidden" + titleBarOverlay, so minimize/maximize/close
+   are painted by the OS above every element in the page. No z-index can cover the
+   three glyphs (2147483000 is already the practical ceiling).
+   Their BACKGROUND is a different story: ui.ts makes the shell push a transparent
+   caption colour for the duration of the overlay, so the video shows through the
+   40px strip instead of a grey toolbar sitting on top of it. That leaves the glyphs
+   floating over the picture — acceptable — but it also means anything we draw up
+   there sits UNDER a native hit target, so Skip has to start below the strip.
+   Do not reintroduce a top: inset on .dba-root: the overlay has to stay inset:0 for
+   the transparent caption to look seamless, and the flex sizing the fit modes rely
+   on stays untouched. NOTE: no backticks in this block. */
+html[data-windows-titlebar]:not([data-fullscreen]) .dba-skip{
+  top:calc(var(--dsh-windows-titlebar-height,40px) + 12px)}
+/* macOS draws its traffic lights natively too (hiddenInset) and offers no caption
+   colour to make transparent, so there the strip is simply excluded: the host
+   reserves --dsh-frame-top-clearance for exactly this. */
+html[data-platform=darwin]:not([data-fullscreen]) .dba-root{top:var(--dsh-frame-top-clearance,0px)}
 .dba-video{width:100%;height:100%;object-fit:contain;background:#000;display:block}
 /* The ONLY difference between the fit modes is object-fit.
    Do not "harden" this with position/inset changes: the bar fix does not need
@@ -26,11 +44,15 @@ export const CSS = `
    NOTE: never put a backtick in this block — the whole sheet is a template
    literal, and one backtick ends it. scripts/check-css-template.mjs enforces it. */
 .dba-video.dba-cover{object-fit:cover;object-position:center}
+/* No text is painted over the film: Skip exists in the tree only as a hit target and
+   fades in when the pointer is on it or the keyboard focuses it, so the window stays
+   clean while the clip plays. Escape closes the overlay for people who never find it.
+   It still keeps its own box, so it cannot swallow a click meant for the video. */
 .dba-skip{position:absolute;top:20px;right:22px;z-index:2;
   border:1px solid rgba(255,255,255,.42);background:rgba(0,0,0,.42);
   color:#fff;border-radius:999px;padding:6px 16px;font-size:13px;line-height:1.4;
-  font-family:inherit;cursor:pointer}
-.dba-skip:hover{background:rgba(0,0,0,.66)}
+  font-family:inherit;cursor:pointer;opacity:0;transition:opacity .18s ease}
+.dba-skip:hover,.dba-skip:focus-visible{opacity:1;background:rgba(0,0,0,.66)}
 .dba-hint{position:absolute;bottom:30px;left:50%;transform:translateX(-50%);
   z-index:2;color:rgba(255,255,255,.82);font-size:13px;letter-spacing:.06em;
   font-family:inherit;text-shadow:0 1px 8px rgba(0,0,0,.9);
@@ -41,9 +63,9 @@ export const CSS = `
   font-family:inherit;text-align:center;max-width:78vw;
   background:rgba(0,0,0,.46);border-radius:10px;padding:10px 18px;
   text-shadow:0 1px 10px rgba(0,0,0,.9)}
-.dba-what{position:absolute;top:20px;left:22px;z-index:2;
-  color:rgba(255,255,255,.72);font-size:12px;letter-spacing:.04em;
-  font-family:inherit;text-shadow:0 1px 8px rgba(0,0,0,.9)}
+/* The "已选片头 · <clip name>" corner label is gone on purpose: it reported which
+   clip the resolver picked, which belongs in diagnostics, not painted over the film.
+   Nothing is left in the top-left, so the caption strip there stays empty. */
 .dba-pin{display:inline-flex;align-items:center;justify-content:center;
   width:28px;height:28px;padding:0;border:0;border-radius:8px;cursor:pointer;
   background:transparent;color:var(--dsw-alias-text-secondary,#888);
