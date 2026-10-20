@@ -60,20 +60,6 @@ const SOURCE_LABEL: Record<string, string> = {
   env: '环境变量',
 }
 
-/** Why this clip is on screen, in words. */
-const REASON_LABEL: Record<string, string> = {
-  preview: '预览',
-  'new-conversation': '新对话',
-  pinned: '钉住的会话',
-  random: '随机播放',
-  selected: '已选片头',
-  active: '当前片头',
-  explicit: '指定片段',
-  /** The host answered with this conversation's own pin, not the global choice. */
-  conversation: '本会话指定',
-  fallback: '回退',
-}
-
 /**
  * The playback surface.
  *
@@ -183,6 +169,60 @@ export function BootOverlay({ store }: { store: ClientStore }): ReactElement | n
     }
   }, [url, nonce, clipId, reason, store, close])
 
+  /**
+   * Let the video show through the Windows caption strip.
+   *
+   * The three window buttons are NATIVE (Electron titleBarOverlay), so the page can
+   * never cover them. Their background, however, is chosen by the shell: the desktop
+   * preload samples `--dsw-specific-sidebar-fill` and `--dsw-alias-label-primary`
+   * off a probe element and pushes them to `win.setTitleBarOverlay` whenever the
+   * body's inline style changes. Overriding those two variables for the duration of
+   * the overlay therefore paints the strip transparent (Electron 25+ supports a
+   * non-opaque WCO colour) and recolours the glyphs so they stay readable on top of
+   * the picture — instead of a grey toolbar with three dark glyphs sitting above a
+   * video that is otherwise filling the window.
+   *
+   * Both variables are restored on unmount: the host only answers for the CURRENT
+   * inline style, so putting the previous values back is what returns the caption to
+   * the app's theme colours, and skipping it would leave a transparent caption
+   * behind after the animation.
+   */
+  const overlayVisible = url !== null && phase !== 'idle'
+  useEffect(() => {
+    if (!overlayVisible) return undefined
+    if (typeof document === 'undefined') return undefined
+    // Only the desktop shell on Windows owns a caption to recolour.
+    if (!document.documentElement.hasAttribute('data-windows-titlebar')) return undefined
+    const body = document.body
+    if (body === null) return undefined
+    const previousFill = body.style.getPropertyValue('--dsw-specific-sidebar-fill')
+    const previousLabel = body.style.getPropertyValue('--dsw-alias-label-primary')
+    body.style.setProperty('--dsw-specific-sidebar-fill', 'transparent')
+    body.style.setProperty('--dsw-alias-label-primary', '#ffffff')
+    return () => {
+      if (previousFill === '') body.style.removeProperty('--dsw-specific-sidebar-fill')
+      else body.style.setProperty('--dsw-specific-sidebar-fill', previousFill)
+      if (previousLabel === '') body.style.removeProperty('--dsw-alias-label-primary')
+      else body.style.setProperty('--dsw-alias-label-primary', previousLabel)
+    }
+  }, [overlayVisible])
+
+  /**
+   * Escape closes the overlay.
+   *
+   * With no skip label and no hint painted over the film, the keyboard is the one
+   * exit that stays discoverable and never puts text on screen. The picker already
+   * binds Escape, and this handler only exists while the overlay is up.
+   */
+  useEffect(() => {
+    if (!overlayVisible) return undefined
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') close()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [overlayVisible, close])
+
   if (url === null || phase === 'idle') return null
 
   const activate = (): void => {
@@ -200,9 +240,6 @@ export function BootOverlay({ store }: { store: ClientStore }): ReactElement | n
       video.requestFullscreen().catch(() => {})
     }
   }
-
-  const clip = clipId === null ? null : store.clip(clipId)
-  const label = REASON_LABEL[reason] ?? reason
 
   return h(
     'div',
@@ -235,15 +272,19 @@ export function BootOverlay({ store }: { store: ClientStore }): ReactElement | n
       },
       onClick: (event: { stopPropagation: () => void }) => event.stopPropagation(),
     }),
-    h('div', { className: 'dba-what' }, `${label} · ${clip?.name ?? clipId ?? ''}`),
     phase === 'playing'
       ? null
       : h('div', { className: 'dba-status' }, phase === 'error' ? (snapshot.playback.message || '视频加载失败') : phase === 'stalled' ? '视频加载超时' : '正在加载视频…'),
+    // The skip button stays in the tree but is invisible until the pointer finds it
+    // (or it is focused with the keyboard): the animation is meant to be watched, so
+    // no text is painted over the picture while it plays. Escape does the same job
+    // and is the discoverable path once nothing is drawn on screen.
     h(
       'button',
       {
         type: 'button',
         className: 'dba-skip',
+        title: '跳过（Esc）',
         onClick: (event: { stopPropagation: () => void }) => {
           event.stopPropagation()
           close()
@@ -251,12 +292,17 @@ export function BootOverlay({ store }: { store: ClientStore }): ReactElement | n
       },
       '跳过',
     ),
-    h(
-      'div',
-      { className: 'dba-hint' },
-      needsTap ? '点击播放' : '点击开启声音 · 全屏',
-      previewClipId !== null && previewClipId === clipId ? ' · 预览中' : '',
-    ),
+    // The hint used to sit on screen for the whole clip. It only carries information
+    // when the browser blocked autoplay and the video is waiting for a click — every
+    // other case is noise drawn over the film.
+    needsTap
+      ? h(
+          'div',
+          { className: 'dba-hint' },
+          '点击播放',
+          previewClipId !== null && previewClipId === clipId ? ' · 预览中' : '',
+        )
+      : null,
   )
 }
 
