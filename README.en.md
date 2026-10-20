@@ -8,7 +8,7 @@ you pinned — a video plays full-frame in the app window.
 - **Plays once per DSH launch** by default (0.4.2); this is a **switch** you can turn off to
   get the original "once per new conversation" behaviour
 - **Or every time** you open a conversation you pinned (one click in the sidebar footer)
-- Fills the whole **client window**, skippable, closes itself when it ends
+- Fills the whole **client window**, **double-click anywhere to skip**, closes itself when it ends
 - **Bring your own video** (three ways, below)
 
 ## Install
@@ -175,9 +175,11 @@ curl http://127.0.0.1:3080/dsh-boot-animation/status.json
 
 Autoplay **with audio** and the **Fullscreen API** both require a user gesture.
 So the animation starts **muted** inside a fixed full-frame overlay (already
-visually fullscreen), and **one click** unmutes it *and* enters real fullscreen.
-If even muted autoplay is refused, a "click to play" state is shown instead of a
-black screen.
+visually fullscreen), and **one click** unmutes it *and* enters real fullscreen
+(after a ~0.25 s wait to rule out the first half of a double click).
+**A double-click anywhere skips the intro** (the top-right 跳过 button does the
+same). If even muted autoplay is refused, a "click to play" state is shown
+instead of a black screen.
 
 ## What it actually covers (stated plainly)
 

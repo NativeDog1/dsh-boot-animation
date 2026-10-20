@@ -5,6 +5,18 @@
 > Changes that a user can see, one section per release. English one-liners are
 > included so an English reader can scan the list.
 
+## 未发布
+
+**新增：双击画面任意处跳过片头。** *New: double-click anywhere to skip the intro.*
+
+片头原本只能点右上角「跳过」；现在画面本身也能跳过，但单击已经被「开启声音 + 真全屏」占用
+（这两个动作都要求用户手势），所以跳过用双击：
+
+- **单击画面**：开启声音并进入真全屏（不变）
+- **双击画面任意处**：跳过片头；右上角「跳过」按钮照旧
+- 单击会先等 250ms 看是不是双击的第一下；是双击就取消，不会先开声/进全屏再关掉
+- 静音自动播放被拒时提示仍是「点击播放」：那一下先把画面播起来，不跳过
+
 ## 0.4.2 — 2026-10-02
 
 **新增：`每次启动 DSH 时播放一次` 开关（默认开）—— 修掉「片头是一次性的」**

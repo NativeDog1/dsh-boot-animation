@@ -322,18 +322,21 @@ const advanced = await evaluate(
 )
 console.log('after 2.5s      :', advanced)
 
+// A double click on the picture is the skip gesture; a single click stays
+// "unmute + fullscreen" because the browser requires a user gesture for both.
+// The dedicated 跳过 button is still exercised by verify-pin.mjs.
 const skipTest = await evaluate(
   client,
   `(() => {
-     const b = document.querySelector('.dba-skip');
-     if (!b) return JSON.stringify({ ok: false });
-     b.click();
+     const v = document.querySelector('.dba-video');
+     if (!v) return JSON.stringify({ ok: false });
+     v.dispatchEvent(new MouseEvent('dblclick', { bubbles: true }));
      return JSON.stringify({ ok: true });
    })()`,
 )
 await sleep(600)
 const afterSkip = await evaluate(client, `JSON.stringify({ overlay: document.querySelectorAll('.dba-root').length })`)
-console.log('skip clicked    :', skipTest, afterSkip)
+console.log('click to skip   :', skipTest, afterSkip)
 
 console.log('\n--- plugin console output ---')
 if (client.pluginLogs.length === 0) console.log('(none)')

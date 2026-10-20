@@ -45,6 +45,13 @@ import { mediaUrlFor, useClientStore, type ClipInfo, type ClientStore, type FitM
 const STALL_TIMEOUT_MS = 25000
 /** How long an error stays readable before the overlay closes itself. */
 const ERROR_LINGER_MS = 8000
+/**
+ * How long a single click waits to see whether a second one turns it into a
+ * double click. Below the OS double-click interval on purpose: a single click
+ * must still feel immediate, and a genuinely slow double click only costs a
+ * brief unmute (the dblclick still closes the overlay).
+ */
+const DOUBLE_CLICK_WINDOW_MS = 250
 
 function formatBytes(n: number): string {
   if (!Number.isFinite(n) || n <= 0) return '0 B'
@@ -110,9 +117,19 @@ export function BootOverlay({ store }: { store: ClientStore }): ReactElement | n
   const [needsTap, setNeedsTap] = useState(false)
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const closedRef = useRef(false)
+  const clickTimer = useRef<number | null>(null)
+
+  /** Drop a single click that turned out to be the first half of a double click. */
+  const cancelPendingClick = useCallback((): void => {
+    if (clickTimer.current !== null) {
+      window.clearTimeout(clickTimer.current)
+      clickTimer.current = null
+    }
+  }, [])
 
   const close = useCallback(() => {
     closedRef.current = true
+    cancelPendingClick()
     const video = videoRef.current
     if (video !== null) {
       try {
@@ -125,7 +142,7 @@ export function BootOverlay({ store }: { store: ClientStore }): ReactElement | n
       document.exitFullscreen().catch(() => {})
     }
     store.stop()
-  }, [store])
+  }, [store, cancelPendingClick])
 
   useEffect(() => {
     if (url === null) return undefined
@@ -177,11 +194,12 @@ export function BootOverlay({ store }: { store: ClientStore }): ReactElement | n
     return () => {
       video.removeEventListener('playing', onPlaying)
       window.clearTimeout(guard)
+      cancelPendingClick()
       // Unmount is another way the overlay disappears (HMR, plugin disable,
       // slot remount). Detaching a <video> does not stop media by itself.
       releaseVideo(video)
     }
-  }, [url, nonce, clipId, reason, store, close])
+  }, [url, nonce, clipId, reason, store, close, cancelPendingClick])
 
   if (url === null || phase === 'idle') return null
 
@@ -201,12 +219,36 @@ export function BootOverlay({ store }: { store: ClientStore }): ReactElement | n
     }
   }
 
+  /**
+   * A single click is "sound + fullscreen"; a double click is SKIP.
+   *
+   * The browser fires the first click before it can know a second one is
+   * coming, so the single-click action waits DOUBLE_CLICK_WINDOW_MS and is
+   * cancelled when the dblclick arrives. Without that wait every skip would
+   * first unmute the clip and request fullscreen, then tear it down again.
+   */
+  const onSurfaceClick = (event: { detail?: number }): void => {
+    // detail > 1 is the second click of a double click; the dblclick handler
+    // owns that gesture, and it will cancel any pending timer anyway.
+    if (typeof event.detail === 'number' && event.detail > 1) return
+    cancelPendingClick()
+    clickTimer.current = window.setTimeout(() => {
+      clickTimer.current = null
+      activate()
+    }, DOUBLE_CLICK_WINDOW_MS)
+  }
+
+  const onSurfaceDoubleClick = (): void => {
+    cancelPendingClick()
+    close()
+  }
+
   const clip = clipId === null ? null : store.clip(clipId)
   const label = REASON_LABEL[reason] ?? reason
 
   return h(
     'div',
-    { className: 'dba-root', onClick: activate },
+    { className: 'dba-root', onClick: onSurfaceClick, onDoubleClick: onSurfaceDoubleClick },
     h('video', {
       ref: videoRef,
       className: fit === 'cover' ? 'dba-video dba-cover' : 'dba-video',
@@ -233,7 +275,6 @@ export function BootOverlay({ store }: { store: ClientStore }): ReactElement | n
           if (!closedRef.current) close()
         }, ERROR_LINGER_MS)
       },
-      onClick: (event: { stopPropagation: () => void }) => event.stopPropagation(),
     }),
     h('div', { className: 'dba-what' }, `${label} · ${clip?.name ?? clipId ?? ''}`),
     phase === 'playing'
@@ -254,7 +295,7 @@ export function BootOverlay({ store }: { store: ClientStore }): ReactElement | n
     h(
       'div',
       { className: 'dba-hint' },
-      needsTap ? '点击播放' : '点击开启声音 · 全屏',
+      needsTap ? '点击播放' : '点击开启声音 · 全屏 · 双击跳过',
       previewClipId !== null && previewClipId === clipId ? ' · 预览中' : '',
     ),
   )
