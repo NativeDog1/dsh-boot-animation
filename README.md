@@ -9,6 +9,8 @@
 - **铺满窗口**、可跳过、放完自动关闭
 - **可以换自己的片子**（三种方式，见下）
 
+<img src="media/preview.gif" width="720" alt="dsh-boot-animation">
+
 ## 安装
 
 ```sh
