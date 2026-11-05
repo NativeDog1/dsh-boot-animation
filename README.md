@@ -9,6 +9,8 @@
 - **铺满窗口**、可跳过、放完自动关闭
 - **可以换自己的片子**（三种方式，见下）
 
+<img src="https://kingofsoysauce.github.io/dsh-skin-market/skin-screenshots/NativeDog1__dsh-boot-animation/24c711296cb4af2618fef4f65e81346a660fc67b/home.gif" width="720" alt="dsh-boot-animation">
+
 ## 安装
 
 ```sh
