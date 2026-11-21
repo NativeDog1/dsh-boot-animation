@@ -1,6 +1,6 @@
 {
   "name": "dsh-boot-animation",
-  "version": "0.4.4",
+  "version": "0.4.5",
   "description": "每次打开 DSH 播一次片头开机动画，铺满窗口；被钉住的会话每次进入都重播。Play a full-frame intro once per DSH launch, and on every entry to a pinned conversation.",
   "type": "module",
   "main": "./lib/index.js",
