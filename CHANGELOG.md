@@ -5,6 +5,34 @@
 > Changes that a user can see, one section per release. English one-liners are
 > included so an English reader can scan the list.
 
+## 0.4.5 — 2026-11-21
+
+**片头片库面板跟随 DSH 的外观，不再自带一套配色。**
+*The library panel follows the kernel's appearance instead of carrying a palette of its own.*
+
+面板原来的每一处表面与描边都来自两个写死的颜色：中性灰 `rgba(127,127,127,…)`，以及选中态的
+微信绿 `#07c160`。灰在白底黑底上都能看，所以这个毛病很容易被漏掉 —— 面板从来没停止**跟随**
+主题，它只是从来不像 DSH。绿色更是内核里没有的第二种强调色，于是「当前这一条」和界面上其它
+「选中」互相打架。
+
+现在所有取值都来自内核自己的主题变量：
+
+- 面板底色 `--dsw-specific-menu`，模糊 `--dsw-menu-backdrop-filter`（和原生菜单同一个 40px）；
+- 文字三级 `--dsw-alias-label-primary / -secondary / -tertiary`；
+- 描边 `--dsw-alias-border-l2 / -l3`，悬停 `--dsw-alias-interactive-bg-hover`；
+- 选中态改用内核的 `--dsw-alias-brand-primary`，淡色底用 `color-mix` 从同一个变量推导，
+  因此在任何主题下都是配套的；
+- 「本会话」与全局选择仍然是两件事，但不再用第二种颜色区分，改用**虚线描边**；
+- 唯一的例外是「⚠ 未优化」这类警告 —— 颜色本身就是信息，所以沿用内核的
+  `--dsw-alias-state-warn-*`。
+
+底栏还加了一条 `--dsw-alias-border-l3` 分隔线，面板看起来更像内核自己的弹层。
+
+顺带修掉一个**静默失效的自检**：`scripts/check-css-template.mjs` 一直在扫描
+`src/client/index.ts`，而样式表搬到 `src/client/styles.ts` 之后那里已经没有 `const CSS`，
+于是这项检查什么都不看、却始终报 ok；它的起始正则也只认 `const CSS`，不认识
+`export const CSS`。两处都修好，并已用一个真的反引号验证它现在会报错（带行号、退出码 1）。
+
 ## 0.4.4 — 2026-10-21
 
 **退场不再是硬切：片尾虚化淡出，应用从模糊里浮出来。**

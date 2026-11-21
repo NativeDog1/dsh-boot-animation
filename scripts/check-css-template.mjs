@@ -18,7 +18,13 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
-const TARGET = join(HERE, '..', 'src', 'client', 'index.ts')
+/**
+ * The sheet moved to its own module when the client half was split; this guard was
+ * left pointing at index.ts, where there is no `const CSS` at all. It therefore
+ * found nothing, scanned nothing and reported ok — a check that had silently
+ * stopped guarding the exact failure it was written for. It reads the real file.
+ */
+const TARGET = join(HERE, '..', 'src', 'client', 'styles.ts')
 
 const lines = readFileSync(TARGET, 'utf8').split(/\r?\n/)
 let inside = false
@@ -27,7 +33,11 @@ const problems = []
 lines.forEach((line, index) => {
   const at = index + 1
   if (!inside) {
-    if (/^\s*const CSS = `/.test(line)) inside = true
+    // `export const CSS` — the sheet is exported now, and the old pattern anchored
+    // on `const CSS` alone never matched it. That was the second way this guard had
+    // gone quiet without saying so: it also cleared `inside` at once, so the
+    // "never closed" check below passed on an empty scan.
+    if (/^\s*(?:export\s+)?const CSS = `/.test(line)) inside = true
     return
   }
   // A line that is only a backtick (plus whitespace) closes the sheet.
